@@ -1,4 +1,4 @@
-vk_tg_dating_bot/                                # корень локального проекта
+vk_tg_dating_bot/   # корень локального проекта
 │
 ├── repo/
 │   ├── README.md               # быстрый старт (локально), зависимости, запуск, сценарии
@@ -18,7 +18,9 @@ vk_tg_dating_bot/                                # корень локально
 │   └── seed.sql                                  # тестовые данные (опционально)
 │
 ├── data/                                         # локальные данные проекта (НЕ коммитить)
-│   ├── photos/                                   # локально сохранённые фото для проверок (если качаешь)
+│   ├── photos/                                   # скачанные фото кандидатов (JPEG/PNG)
+│   │   └── <vk_user_id>/                         # по папкам на каждого кандидата
+│   ├── models/                                   # ONNX-модели InsightFace (buffalo_l), НЕ коммитить
 │   ├── cache/                                    # кэш ответов/временные файлы
 │   └── logs/                                     # локальные логи приложения (rotating)
 │
@@ -46,10 +48,11 @@ vk_tg_dating_bot/                                # корень локально
 │   │   │   ├── models.py                          # SQLAlchemy модели таблиц
 │   │   │   └── repositories.py                    # репозитории CRUD
 │   │   │
-│   │   └── vision/                                # (опционально) локальная обработка фото
-│   │       ├── blur_check.py                      # blur-check на CPU (если используешь)
-│   │       ├── face_check.py                      # “одно лицо/много лиц” (если используешь)
-│   │       └── photo_selector.py                  # выбор топ-3 фото (если используешь)
+│   │   └── vision/                                # обработка фото — InsightFace (ONNXRuntime, CPU)
+│   │       ├── detector.py                        # SCRFD: detect_faces(image) → list[Face]
+│   │       ├── embedder.py                        # ArcFace: get_embedding(image, face) → ndarray(512)
+│   │       ├── blur_check.py                      # variance of Laplacian: calc_blur_score → float
+│   │       └── photo_selector.py                  # оркестратор: detect → filter → blur → embed → топ-3
 │   │
 │   ├── application/                               # бизнес-логика / use-cases
 │   │   ├── services/
@@ -57,7 +60,8 @@ vk_tg_dating_bot/                                # корень локально
 │   │   │   ├── filters_service.py                 # “настроить фильтры” (город/пол/возраст)
 │   │   │   ├── dating_service.py                  # предыдущий/следующий кандидат + показать карточку
 │   │   │   ├── favorites_service.py               # избранное: добавить/удалить/список
-│   │   │   └── blacklist_service.py               # чёрный список: добавить/проверка
+│   │   │   ├── blacklist_service.py               # чёрный список: добавить/проверка
+│   │   │   └── photo_processing_service.py        # фоновый воркер: скачивание + InsightFace пайплайн
 │   │   │
 │   │   └── strategies/
 │   │       ├── search_pagination.py               # обход лимита 1000 (сегментация)
@@ -99,10 +103,14 @@ Telegram-бот на Python для локального запуска, кото
   2) пол
   3) возраст от
   4) возраст до
+- Фотографии кандидатов отбираются через InsightFace (ONNXRuntime, CPU):
+  - SCRFD — детекция лиц, отсев фото без лица / с несколькими лицами / размытых.
+  - ArcFace (512-d) — эмбеддинги для проверки, что на топ-3 фото один и тот же человек.
+  - Файлы хранятся на диске (`data/photos/`), метаданные и эмбеддинги — в PostgreSQL.
 - Бот показывает кандидатов карточками:
   - Имя Фамилия
   - ссылка на профиль VK
-  - 3 фото attachments
+  - 3 лучшие фото (отобраны через InsightFace)
 - Управление через кнопки (без лайков):
   - Предыдущий
   - Далее
@@ -115,15 +123,16 @@ Telegram-бот на Python для локального запуска, кото
 ## 2. Архитектурный подход
 Слои:
 1) Presentation (Telegram) — UI и FSM.
-2) Application (Use-cases) — бизнес-логика и сценарии.
-3) Infrastructure — VK API + PostgreSQL + (опционально) vision.
+2) Application (Use-cases) — бизнес-логика, сценарии, фоновый воркер обработки фото.
+3) Infrastructure — VK API + PostgreSQL + Vision (InsightFace).
 4) Domain — модели данных, не завязанные на конкретные реализации.
 
 Принципы:
-- Telegram handlers не выполняют “тяжёлую” логику поиска и не пишут SQL.
+- Telegram handlers не выполняют "тяжёлую" логику поиска и не пишут SQL.
 - VK API инкапсулирован в infrastructure/vk.
 - Все запросы к БД через repositories.
 - Application services склеивают VK + DB и возвращают DTO для отображения.
+- Обработка фото (скачивание, детекция лиц, эмбеддинги) выполняется фоновым воркером малыми пачками, опережая курсор пользователя.
 
 ---
 
@@ -193,7 +202,21 @@ Telegram-бот на Python для локального запуска, кото
   - уже показанных (seen),
   - из чёрного списка,
 - фиксировать показ кандидата (seen + history cursor).
-- формировать карточку кандидата (DTO) с 3 фото attachments.
+- формировать карточку кандидата (DTO) с 3 фото (уже отобранными через InsightFace).
+
+#### PhotoProcessingService (photo_processing_service.py)
+Фоновый воркер, обрабатывает кандидатов из `search_queue` малыми пачками (по 5):
+1) Берёт следующих кандидатов со статусом `new` (исключая seen/blacklist).
+2) Скачивает фото через VK photos.get (сортировка по лайкам) → сохраняет в `data/photos/`.
+3) Прогоняет каждое фото через пайплайн InsightFace:
+   - SCRFD: детекция лиц → `faces_count`, `det_score`, `bbox`.
+   - Фильтрация: ровно 1 лицо, `det_score` выше порога, лицо не слишком мелкое.
+   - Blur-check: variance of Laplacian → `blur_score`, отсев размытых.
+   - ArcFace: вычисление эмбеддинга (512 float32) → `embedding`.
+4) Проверка консистентности: cosine similarity между эмбеддингами топ-фото — один и тот же человек.
+5) Выбор топ-3 фото (status = `selected`), остальные — `rejected` с `reject_reason`.
+6) Обновление `vk_profiles.status` → `ready`.
+7) Воркер поддерживает буфер ~5 готовых кандидатов впереди курсора пользователя.
 
 #### FavoritesService / BlacklistService
 - add/remove/list favorites
@@ -221,21 +244,38 @@ Telegram-бот на Python для локального запуска, кото
 - `models.py` — таблицы
 - `repositories.py` — CRUD и запросы
 
-#### Vision (опционально)
+#### Vision (InsightFace)
 Папка: `src/infrastructure/vision/`
-Если ты используешь правила “одно лицо / blur-check / один и тот же человек”, то:
-- фото прогоняются через photo_selector.
-Если решишь упростить, можно оставить только сортировку по лайкам.
+Стек: InsightFace через ONNXRuntime (CPU), модель buffalo_l.
+
+- `detector.py` — инициализация SCRFD-детектора, метод `detect_faces(image) → list[Face]`.
+  Каждый Face содержит: bbox, det_score, landmark.
+- `embedder.py` — извлечение ArcFace эмбеддинга (512 float32) из кропа лица.
+  Метод `get_embedding(image, face) → np.ndarray`.
+- `blur_check.py` — оценка резкости кропа лица через variance of Laplacian.
+  Метод `calc_blur_score(image, bbox) → float`.
+- `photo_selector.py` — оркестратор пайплайна для одного кандидата:
+  1) Для каждого фото: detect → filter (1 лицо, score, size) → blur → embed.
+  2) Cosine similarity между эмбеддингами — проверка "один человек".
+  3) Ранжирование accepted-фото по лайкам → топ-3 (status = `selected`).
+  Метод `select_top_photos(photos: list[VkPhoto]) → list[VkPhoto]`.
 
 ---
 
 ## 4. База данных (PostgreSQL) — что и зачем хранить
-Нужно хранить:
-- tg_user (Telegram user + vk_token + vk_id+ фильтры)
-- seen_profile (кого показывали)
-- favorites (избранное)
-- blacklist (чёрный список)
-- history_cursor (позиция для “Предыдущий/Далее”)
+
+| Таблица | Назначение |
+|---------|-----------|
+| `tg_users` | Telegram user + vk_token + vk_id + фильтры + history_cursor |
+| `vk_profiles` | Данные кандидатов (имя, фамилия, ссылка, статус: new/processing/ready/error) |
+| `vk_photos` | Метаданные фото, результаты детекции лиц, blur_score, эмбеддинги ArcFace, статус (raw/accepted/rejected/selected) |
+| `search_queue` | Очередь кандидатов из users.search per user (с позицией) |
+| `seen_profiles` | Показанные кандидаты (исключение повторов при поиске) |
+| `view_history` | Упорядоченная история просмотров (для "Предыдущий/Далее") |
+| `favorite_profiles` | Избранное |
+| `blacklist_profiles` | Чёрный список |
+
+Файлы фотографий (JPEG/PNG) хранятся на диске в `data/photos/`, в БД — только пути и метаданные.
 
 Подробно: `docs/db_schema.md`
 
@@ -261,12 +301,25 @@ Telegram-бот на Python для локального запуска, кото
    - возраст до
 3) После завершения сохраняем фильтры в tg_user и открываем главный экран.
 
-### 5.3 Далее / Предыдущий
+### 5.3 Гибридный поиск и обработка кандидатов
+Поиск разделён на два этапа для экономии памяти и мгновенного отклика:
+
+**Этап 1 — Сбор ID (дешёвый):**
+1) `users.search` по фильтрам → список VK ID + имя/фамилия.
+2) Upsert в `vk_profiles` (status = `new`).
+3) Запись в `search_queue` (per user, с позицией).
+
+**Этап 2 — Фоновая обработка малыми пачками (по 5):**
+1) PhotoProcessingService берёт следующих 5 кандидатов из `search_queue` (status = `new`, не в seen/blacklist).
+2) Для каждого: `photos.get` → скачивание → InsightFace пайплайн → топ-3 фото.
+3) `vk_profiles.status` = `ready`.
+4) Воркер поддерживает буфер ~5 готовых кандидатов впереди курсора.
+
+**Показ пользователю:**
 - Далее: DatingService.get_next_candidate
-  - поиск по сегментам (обход 1000)
-  - исключение seen/blacklist
-  - выбор фото
+  - берёт следующего `ready`-кандидата из очереди
   - запись в history + seen
+  - если буфер < 5 — воркер подгружает ещё пачку
 - Предыдущий: DatingService.get_prev_candidate
   - берём из локальной истории показов
   - показываем карточку без нового поиска
@@ -288,6 +341,10 @@ Telegram-бот на Python для локального запуска, кото
 Переменные окружения (.env)
 - `TG_BOT_TOKEN=...`
 - `DATABASE_URL=postgresql+psycopg://user:pass@localhost:5432/vkbot`
+- `INSIGHTFACE_MODEL=buffalo_l` — модель InsightFace (SCRFD + ArcFace)
+- `PHOTO_DIR=./data/photos` — путь для скачанных фото
+- `PHOTO_BATCH_SIZE=5` — размер пачки фонового воркера
+- `PHOTO_BUFFER_AHEAD=5` — сколько ready-кандидатов держать впереди курсора
 
 2) Postgres локально
 3) `scripts/init_db.sql`
