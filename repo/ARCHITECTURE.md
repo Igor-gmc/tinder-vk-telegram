@@ -1,3 +1,7 @@
+## ARCHITECTURE.md (целиком)
+
+```md
+
 vk_tg_dating_bot/   # корень локального проекта
 │
 ├── repo/
@@ -84,14 +88,9 @@ vk_tg_dating_bot/   # корень локального проекта
     ├── user_manual.md              # мануал: сценарии, кнопки, настройка фильтров, избранное/чс  
     ├── db_schema.md                # таблицы, поля, индексы, уникальности  
     └── vk_api_notes.md             # методы VK, параметры поиска, attachments, лимит 1000  
-  
+    
 
-  
----
 
-## ARCHITECTURE.md (целиком)
-
-```md
 # VK Dating Telegram Bot — Архитектура (локальный проект)
 
 ## 1. Назначение
@@ -337,15 +336,7 @@ Telegram-бот на Python для локального запуска, кото
 ---
 
 ## 7. Локальный запуск
-1) `.env`
-Переменные окружения (.env)
-- `TG_BOT_TOKEN=...`
-- `DATABASE_URL=postgresql+psycopg://user:pass@localhost:5432/vkbot`
-- `INSIGHTFACE_MODEL=buffalo_l` — модель InsightFace (SCRFD + ArcFace)
-- `PHOTO_DIR=./data/photos` — путь для скачанных фото
-- `PHOTO_BATCH_SIZE=5` — размер пачки фонового воркера
-- `PHOTO_BUFFER_AHEAD=5` — сколько ready-кандидатов держать впереди курсора
-
+1) `.env.example` переменные окружения для создания .env
 2) Postgres локально
 3) `scripts/init_db.sql`
 4) `python -m src.main`
