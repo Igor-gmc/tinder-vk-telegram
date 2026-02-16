@@ -1,92 +1,92 @@
 vk_tg_dating_bot/   # корень локального проекта
 │
 ├── repo/
-│   ├── README.md               # быстрый старт (локально), зависимости, запуск, сценарии
-│   ├── ARCHITECTURE.md         # архитектура, слои, потоки данных, FSM, кнопки, фильтры, БД
-│   ├── WORKPLAN.md             # план работ и распределение задач для 2 разработчиков (локально)
-│
-├── .env.example                                 # пример переменных окружения (TG/DB), без секретов
-├── requirements.txt                             # зависимости (локально)
-├── .gitignore                                   # исключаем .env, data/, кэши, логи, venv и пр.
-│
-├── docker-compose.yml                            # (опционально) локальный Postgres через Docker (не деплой!)
-│                                                 # можно удалить, если Postgres установлен системно
-│
-├── scripts/                                      # скрипты для локальной БД и служебные SQL
-│   ├── init_db.sql                               # создание таблиц (преподаватель/проверка без кода)
-│   ├── reset_db.sql                              # снести и пересоздать таблицы (опционально)
-│   └── seed.sql                                  # тестовые данные (опционально)
-│
-├── data/                                         # локальные данные проекта (НЕ коммитить)
-│   ├── photos/                                   # скачанные фото кандидатов (JPEG/PNG)
-│   │   └── <vk_user_id>/                         # по папкам на каждого кандидата
-│   ├── models/                                   # ONNX-модели InsightFace (buffalo_l), НЕ коммитить
-│   ├── cache/                                    # кэш ответов/временные файлы
-│   └── logs/                                     # локальные логи приложения (rotating)
-│
-├── src/                                          # исходный код
-│   ├── main.py                                   # точка входа: запускает Telegram-бота локально
+│   ├── README.md               # быстрый старт (локально), зависимости, запуск, сценарии  
+│   ├── ARCHITECTURE.md         # архитектура, слои, потоки данных, FSM, кнопки, фильтры, БД  
+│   ├── WORKPLAN.md             # план работ и распределение задач для 2 разработчиков (локально)  
+│  
+├── .env.example                # пример переменных окружения (TG/DB), без секретов  
+├── requirements.txt            # зависимости (локально)  
+├── .gitignore                  # исключаем .env, data/, кэши, логи, venv и пр.  
+│  
+├── docker-compose.yml          # (опционально) локальный Postgres через Docker (не деплой!)  
+│                               # можно удалить, если Postgres установлен системно  
+│  
+├── scripts/                    # скрипты для локальной БД и служебные SQL  
+│   ├── init_db.sql             # создание таблиц (преподаватель/проверка без кода)  
+│   ├── reset_db.sql            # снести и пересоздать таблицы (опционально)  
+│   └── seed.sql                # тестовые данные (опционально)  
+│  
+├── data/                       # локальные данные проекта (НЕ коммитить)  
+│   ├── photos/                 # скачанные фото кандидатов (JPEG/PNG)  
+│   │   └── <vk_user_id>/       # по папкам на каждого кандидата  
+│   ├── models/                 # ONNX-модели InsightFace (buffalo_l), НЕ коммитить  
+│   ├── cache/                  # кэш ответов/временные файлы  
+│   └── logs/                   # локальные логи приложения (rotating)  
+│  
+├── src/                        # исходный код  
+│   ├── main.py                 # точка входа: запускает Telegram-бота локально  
+│   │  
+│   ├── core/                   # конфиг, логирование, константы, исключения  
+│   │   ├── config.py           # загрузка .env, валидация конфигурации, единый доступ к настройкам  
+│   │   ├── logging.py          # настройка логов (ротация, путь ./data/logs)  
+│   │   ├── constants.py        # константы: лимиты, имена кнопок, VK API version  
+│   │   └── exceptions.py       # VkApiError, DbError, ValidationError и т.п.  
 │   │
-│   ├── core/                                     # конфиг, логирование, константы, исключения
-│   │   ├── config.py                              # загрузка .env, валидация конфигурации, единый доступ к настройкам
-│   │   ├── logging.py                             # настройка логов (ротация, путь ./data/logs)
-│   │   ├── constants.py                           # константы: лимиты, имена кнопок, VK API version
-│   │   └── exceptions.py                          # VkApiError, DbError, ValidationError и т.п.
-│   │
-│   ├── domain/                                   # доменные модели (не завязаны на Telegram/VK/SQLAlchemy)
-│   │   ├── models.py                              # Candidate, Photo, SearchFilters, UserSessionState...
-│   │   └── enums.py                               # Gender, UiState, CallbackAction...
-│   │
-│   ├── infrastructure/                            # интеграции (VK/DB)
-│   │   ├── vk/                                    # всё взаимодействие с VK API
-│   │   │   ├── client.py                          # HTTP-клиент VK (token per user, retry/backoff)
-│   │   │   ├── methods.py                         # users.search, photos.get, users.get, utils.resolveScreenName...
-│   │   │   └── attachments.py                     # сборка attachment: photo{owner_id}_{photo_id}
+│   ├── domain/                 # доменные модели (не завязаны на Telegram/VK/SQLAlchemy)  
+│   │   ├── models.py           # Candidate, Photo, SearchFilters, UserSessionState...  
+│   │   └── enums.py            # Gender, UiState, CallbackAction...  
+│   │  
+│   ├── infrastructure/         # интеграции (VK/DB)  
+│   │   ├── vk/                 # всё взаимодействие с VK API  
+│   │   │   ├── client.py       # HTTP-клиент VK (token per user, retry/backoff)  
+│   │   │   ├── methods.py      # users.search, photos.get, users.get, utils.resolveScreenName...  
+│   │   │   └── attachments.py  # сборка attachment: photo{owner_id}_{photo_id}  
+│   │   │  
+│   │   ├── db/                 # всё взаимодействие с PostgreSQL  
+│   │   │   ├── session.py      # engine/sessionmaker  
+│   │   │   ├── models.py       # SQLAlchemy модели таблиц  
+│   │   │   └── repositories.py # репозитории CRUD  
 │   │   │
-│   │   ├── db/                                    # всё взаимодействие с PostgreSQL
-│   │   │   ├── session.py                         # engine/sessionmaker
-│   │   │   ├── models.py                          # SQLAlchemy модели таблиц
-│   │   │   └── repositories.py                    # репозитории CRUD
-│   │   │
-│   │   └── vision/                                # обработка фото — InsightFace (ONNXRuntime, CPU)
-│   │       ├── detector.py                        # SCRFD: detect_faces(image) → list[Face]
-│   │       ├── embedder.py                        # ArcFace: get_embedding(image, face) → ndarray(512)
-│   │       ├── blur_check.py                      # variance of Laplacian: calc_blur_score → float
-│   │       └── photo_selector.py                  # оркестратор: detect → filter → blur → embed → топ-3
-│   │
-│   ├── application/                               # бизнес-логика / use-cases
-│   │   ├── services/
-│   │   │   ├── auth_service.py                    # сохранить токен, протестировать VK соединение
-│   │   │   ├── filters_service.py                 # “настроить фильтры” (город/пол/возраст)
-│   │   │   ├── dating_service.py                  # предыдущий/следующий кандидат + показать карточку
-│   │   │   ├── favorites_service.py               # избранное: добавить/удалить/список
-│   │   │   ├── blacklist_service.py               # чёрный список: добавить/проверка
-│   │   │   └── photo_processing_service.py        # фоновый воркер: скачивание + InsightFace пайплайн
-│   │   │
-│   │   └── strategies/
-│   │       ├── search_pagination.py               # обход лимита 1000 (сегментация)
-│   │       └── filters.py                         # фильтры кандидатов (seen/blacklist/валидность)
-│   │
-│   ├── presentation/                              # внешний интерфейс приложения
-│   │   └── tg/                                    # Telegram-бот (aiogram)
-│   │       ├── bot.py                             # Bot/Dispatcher, регистрация роутеров
-│   │       ├── handlers.py                        # обработчики: /start, токен, фильтры, навигация, избранное
-│   │       ├── keyboards.py                       # клавиатуры согласно новой архитектуре кнопок
-│   │       ├── states.py                          # FSM: ввод токена, настройка фильтров (4 вопроса)
-│   │       └── formatters.py                      # формат карточки кандидата + списки
-│   │
-│   └── tests/                                     # тесты (локально)
-│       ├── test_filters.py                        # тесты валидации фильтров
-│       ├── test_repositories.py                   # тесты репозиториев
-│       └── conftest.py                            # фикстуры pytest
+│   │   └── vision/                 # обработка фото — InsightFace (ONNXRuntime, CPU)  
+│   │       ├── detector.py         # SCRFD: detect_faces(image) → list[Face]  
+│   │       ├── embedder.py         # ArcFace: get_embedding(image, face) → ndarray(512)  
+│   │       ├── blur_check.py       # variance of Laplacian: calc_blur_score → float  
+│   │       └── photo_selector.py   # оркестратор: detect → filter → blur → embed → топ-3  
+│   │  
+│   ├── application/                        # бизнес-логика / use-cases  
+│   │   ├── services/  
+│   │   │   ├── auth_service.py             # сохранить токен, протестировать VK соединение  
+│   │   │   ├── filters_service.py          # “настроить фильтры” (город/пол/возраст)  
+│   │   │   ├── dating_service.py           # предыдущий/следующий кандидат + показать карточку  
+│   │   │   ├── favorites_service.py        # избранное: добавить/удалить/список  
+│   │   │   ├── blacklist_service.py        # чёрный список: добавить/проверка  
+│   │   │   └── photo_processing_service.py # фоновый воркер: скачивание + InsightFace пайплайн  
+│   │   │  
+│   │   └── strategies/  
+│   │       ├── search_pagination.py        # обход лимита 1000 (сегментация)  
+│   │       └── filters.py                  # фильтры кандидатов (seen/blacklist/валидность)  
+│   │  
+│   ├── presentation/               # внешний интерфейс приложения  
+│   │   └── tg/                     # Telegram-бот (aiogram)  
+│   │       ├── bot.py              # Bot/Dispatcher, регистрация роутеров  
+│   │       ├── handlers.py         # обработчики: /start, токен, фильтры, навигация, избранное  
+│   │       ├── keyboards.py        # клавиатуры согласно новой архитектуре кнопок  
+│   │       ├── states.py           # FSM: ввод токена, настройка фильтров (4 вопроса)  
+│   │       └── formatters.py       # формат карточки кандидата + списки  
+│   │  
+│   └── tests/                      # тесты (локально)  
+│       ├── test_filters.py         # тесты валидации фильтров  
+│       ├── test_repositories.py    # тесты репозиториев  
+│       └── conftest.py             # фикстуры pytest  
 │
-└── docs/                                          # документация (локальная)
-    ├── user_manual.md                             # мануал: сценарии, кнопки, настройка фильтров, избранное/чс
-    ├── db_schema.md                               # таблицы, поля, индексы, уникальности
-    └── vk_api_notes.md                            # методы VK, параметры поиска, attachments, лимит 1000
+└── docs/                           # документация (локальная)  
+    ├── user_manual.md              # мануал: сценарии, кнопки, настройка фильтров, избранное/чс  
+    ├── db_schema.md                # таблицы, поля, индексы, уникальности  
+    └── vk_api_notes.md             # методы VK, параметры поиска, attachments, лимит 1000  
+  
 
-
-
+  
 ---
 
 ## ARCHITECTURE.md (целиком)
