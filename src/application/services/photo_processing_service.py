@@ -1,5 +1,7 @@
 # фоновый воркер: скачивание + InsightFace пайплайн
 
+import asyncio
+import functools
 import logging
 import aiohttp
 from pathlib import Path
@@ -30,11 +32,19 @@ class PhotoProcessingService:
     download_n: int = 10     # сколько фото скачивать для анализа InsightFace
     _detector: object | None = field(default=None, repr=False)
 
-    def _get_detector(self):
-        """Ленивая инициализация детектора (модель загружается один раз)."""
+    async def _get_detector_async(self):
+        """Ленивая инициализация детектора в thread pool (модель загружается один раз)."""
         if self._detector is None:
-            self._detector = FaceDetector()
+            loop = asyncio.get_running_loop()
+            self._detector = await loop.run_in_executor(None, FaceDetector)
         return self._detector
+
+    async def warm_up_detector(self) -> None:
+        """Прогрев детектора при старте приложения."""
+        if not _HAS_INSIGHTFACE:
+            return
+        await self._get_detector_async()
+        logger.info('FaceDetector прогрет и готов к работе')
 
     async def fetch_and_save_photos(self, access_token: str, vk_user_id: int) -> list[PhotoDTO]:
         """
@@ -91,12 +101,17 @@ class PhotoProcessingService:
         user_dir = self.photos_dir / str(vk_user_id)
         user_dir.mkdir(parents=True, exist_ok=True)
 
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            tasks = [self._download_photo(photo, user_dir, session) for photo in to_download]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
         downloaded = []
-        for photo in to_download:
-            local_path = await self._download_photo(photo, user_dir)
-            if local_path:
-                photo.local_path = str(local_path)
-                downloaded.append(photo)
+        for photo, result in zip(to_download, results):
+            if isinstance(result, Exception) or result is None:
+                continue
+            photo.local_path = str(result)
+            downloaded.append(photo)
 
         if not downloaded:
             return []
@@ -122,11 +137,11 @@ class PhotoProcessingService:
             return fallback
 
         logger.info('Кандидат %d: запуск InsightFace для %d фото', vk_user_id, len(downloaded))
-        detector = self._get_detector()
-        selected = select_top_photos(
-            detector=detector,
-            photos=downloaded,
-            top_n=self.top_n,
+        detector = await self._get_detector_async()
+        loop = asyncio.get_running_loop()
+        selected = await loop.run_in_executor(
+            None,
+            functools.partial(select_top_photos, detector=detector, photos=downloaded, top_n=self.top_n),
         )
 
         # если InsightFace не выбрал ни одного — fallback на top-3 по лайкам
@@ -153,7 +168,7 @@ class PhotoProcessingService:
         best = max(sizes, key=lambda s: priority.get(s.get("type", ""), -1))
         return best.get("url")
 
-    async def _download_photo(self, photo: PhotoDTO, user_dir: Path) -> Path | None:
+    async def _download_photo(self, photo: PhotoDTO, user_dir: Path, session: aiohttp.ClientSession) -> Path | None:
         """Скачивает одно фото на диск."""
         filename = f'{photo.photo_id}.jpg'
         filepath = user_dir / filename
@@ -163,12 +178,10 @@ class PhotoProcessingService:
             return filepath
 
         try:
-            timeout = aiohttp.ClientTimeout(total=15)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(photo.url, ssl=False) as resp:
-                    if resp.status != 200:
-                        return None
-                    content = await resp.read()
+            async with session.get(photo.url, ssl=False) as resp:
+                if resp.status != 200:
+                    return None
+                content = await resp.read()
 
             filepath.write_bytes(content)
             return filepath

@@ -244,6 +244,7 @@ def setup_handlers(
         if not photos:
             user = await user_repo.get_or_create_user(tg_user_id)
             if user.vk_access_token:
+                loading_msg = await message.answer("Ищу фото кандидата...")
                 try:
                     photos = await photo_service.fetch_and_save_photos(
                         access_token=user.vk_access_token,
@@ -251,6 +252,11 @@ def setup_handlers(
                     )
                 except VkApiError:
                     photos = []
+                finally:
+                    try:
+                        await loading_msg.delete()
+                    except Exception:
+                        pass
 
         local_photos = [p for p in photos if p.local_path and Path(p.local_path).exists()]
 
@@ -419,6 +425,7 @@ def setup_handlers(
         if not photos:
             user = await user_repo.get_or_create_user(tg_user_id)
             if user.vk_access_token:
+                loading_msg = await callback.message.answer("Ищу фото кандидата...")
                 try:
                     photos = await photo_service.fetch_and_save_photos(
                         access_token=user.vk_access_token,
@@ -426,6 +433,11 @@ def setup_handlers(
                     )
                 except VkApiError:
                     photos = []
+                finally:
+                    try:
+                        await loading_msg.delete()
+                    except Exception:
+                        pass
 
         # текст карточки
         if profile:

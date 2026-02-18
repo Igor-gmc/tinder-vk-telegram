@@ -13,10 +13,10 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 
-def setup_bot(token: str) -> tuple[Dispatcher, Bot]:
+def setup_bot(token: str) -> tuple[Dispatcher, Bot, PhotoProcessingService]:
     """
     Собирает бота и диспетчер так, чтобы можно было тестить другим token.
-    Возвращает (dp, bot).
+    Возвращает (dp, bot, photo_service).
     """
     # FSM память
     storage = MemoryStorage()
@@ -47,14 +47,17 @@ def setup_bot(token: str) -> tuple[Dispatcher, Bot]:
     dp.include_router(router=router)
 
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode="HTML"))
-    return dp, bot
+    return dp, bot, photo_service
 
 
 async def start_bot() -> None:
-    # получаем Dispatcher, Bot
-    dp, bot = setup_bot(token=TG_TOKEN)
-    
-    # запуск бота    
+    # получаем Dispatcher, Bot, PhotoProcessingService
+    dp, bot, photo_service = setup_bot(token=TG_TOKEN)
+
+    # прогрев InsightFace детектора (в thread pool, не блокирует)
+    await photo_service.warm_up_detector()
+
+    # запуск бота
     try:
         await dp.start_polling(bot)
     finally:
