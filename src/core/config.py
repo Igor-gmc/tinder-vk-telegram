@@ -7,6 +7,7 @@ from dataclasses import dataclass
 load_dotenv()
 
 TG_TOKEN = os.getenv('TG_TOKEN')
+VK_API_VERSION = os.getenv('VK_API_VERSION')
 
 # Путь для сохранения данных и результатов обработки - не пушится
 BASE_PATH: Path = Path(__file__).resolve().parents[2]

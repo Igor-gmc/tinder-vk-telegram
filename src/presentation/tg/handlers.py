@@ -2,7 +2,10 @@
 
 import asyncio
 
+from src.application.services.auth_service import AuthService
+from src.application.services import auth_service
 from src.presentation.tg.states import AuthState, FilterState, MenuState
+from src.core.exceptions import VkApiError
 from src.presentation.tg.keyboards import (
     kb_favorite_item, kb_main, kb_more, kb_start, kb_after_auth,
     kb_favorites_inline, kb_favorites_delete_inline, kb_favorite_back
@@ -10,12 +13,12 @@ from src.presentation.tg.keyboards import (
 from src.infrastructure.db.repositories import InMemoryUserRepo
 
 from aiogram import Router, F
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 
-def setup_handlers(user_repo: InMemoryUserRepo) -> Router:
+def setup_handlers(user_repo: InMemoryUserRepo, auth_service: AuthService) -> Router:
     router = Router()
 
     # функция для реагирования на команду /start
@@ -31,56 +34,75 @@ def setup_handlers(user_repo: InMemoryUserRepo) -> Router:
         await state.set_state(AuthState.waiting_vk_token)
         await message.answer("Шаг 1/2: Введите токен VK")
 
-    # ожидаем токен от пользователя
+    # ожидаем токен от пользователя (Шаг 1/2)
     @router.message(AuthState.waiting_vk_token)
     async def got_vk_token(message: Message, state: FSMContext) -> None:
+        """
+        Срабатывает, когда бот находится в состоянии ожидания токена.
+        1) валидируем что токен не пустой
+        2) кладём токен в FSM (state data)
+        3) переводим пользователя на шаг 2/2: ввод VK_ID
+        """
         token = message.text.strip()
 
         if not token:
             await message.answer("Токен не может быть пустым! Введите токен еще раз.")
             return
 
-        # записываем в память VK токен
+        # сохраняем токен в FSM (в оперативной памяти FSM storage)
         await state.update_data(vk_access_token=token)
 
-        # Переключаемся на ожидание VK ID
+        # переключаемся на ожидание VK ID
         await state.set_state(AuthState.waiting_vk_user_id)
         await message.answer("Шаг 2/2: Введите VK_ID")
 
-    # ожидаем от пользователя VK ID
+
+    # ожидаем от пользователя VK ID (Шаг 2/2)
     @router.message(AuthState.waiting_vk_user_id)
     async def got_vk_id(message: Message, state: FSMContext) -> None:
+        """
+        Срабатывает, когда бот ждёт VK_ID.
+        1) парсим VK_ID
+        2) берём токен из FSM
+        3) вызываем auth_service.authorize (там VK users.get + сверка владельца токена)
+        4) если всё ок — показываем кнопку настройки фильтров
+        """
+        # 1) Парсим VK_ID
         try:
             vk_user_id = int(message.text.strip())
         except ValueError:
             await message.answer("VK ID должен быть числом! Введите ID еще раз.")
             return
 
-        # читаем токен из FSM
+        # 2) Берём токен из FSM (который сохранили на шаге 1/2)
         data = await state.get_data()
         vk_access_token = data.get("vk_access_token")
 
         if not vk_access_token:
-            await message.answer("Что-то пошло не так. Снова авторизуйтесь — нажмите Старт")
+            await message.answer("Токен не найден. Снова авторизуйтесь — нажмите Старт")
             await state.clear()
             return
 
         tg_user_id = message.from_user.id
 
-        await user_repo.upsert_user_token_and_vk_id(
-            tg_user_id=tg_user_id,
-            vk_access_token=vk_access_token,
-            vk_user_id=vk_user_id,
-        )
+        # 3) Валидация + сохранение внутри AuthService
+        try:
+            await auth_service.authorize(
+                tg_user_id=tg_user_id,
+                access_token=vk_access_token,
+                expected_vk_user_id=vk_user_id,
+            )
+        except VkApiError as e:
+            await message.answer(f"Ошибка VK: {e.msg}\nВведите токен заново.")
+            await state.clear()
+            await state.set_state(AuthState.waiting_vk_token)
+            return
 
-        # завершаем FSM авторизации
+        # 4) Успех: очищаем FSM и показываем следующий шаг
         await state.clear()
+        await message.answer("Токен валиден ✅ Данные авторизации записаны ✅", reply_markup=kb_after_auth())
 
-        # сообщаем что данные записаны
-        await message.answer("Данные авторизации записаны ✅", reply_markup=kb_after_auth())
-
-        # НЕ time.sleep — иначе бот зависнет
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
         await message.answer("Чтобы настроить фильтры для поиска кандидатов нажмите «Настроить фильтры»")
 
     # старт настройки фильтров
@@ -205,6 +227,8 @@ def setup_handlers(user_repo: InMemoryUserRepo) -> Router:
     @router.message(MenuState.main, F.text == 'Далее')
     async def main_next(message: Message, state: FSMContext) -> None:
         # тут будет код пролистывания вперед
+        vk_profile_id = 777
+        await state.update_data(current_vk_profile_id=vk_profile_id)
         await message.answer('Главное меню', reply_markup=kb_main())
 
     ## Вернуться в главное меню при нажатии Назад
@@ -225,21 +249,31 @@ def setup_handlers(user_repo: InMemoryUserRepo) -> Router:
     async def add_favorite(message: Message, state: FSMContext) -> None:
         # запоминаем данные кто добавляет и кого добавляют
         tg_user_id = message.from_user.id
-        vk_profile_id = 123456
+
+        data = await state.get_data()
+        vk_profile_id = data.get('current_vk_profile_id')
+        if not vk_profile_id:
+            await message.answer("Сначала нажмите «Далее», чтобы выбрать кандидата.", reply_markup=kb_more())
+            return 
         # записываем добавленного в БД
         await user_repo.add_favorite(tg_user_id=tg_user_id, vk_profile_id=vk_profile_id)
-        await message.answer(f'Добавлено в избранное vk_id={tg_user_id}', reply_markup=kb_more())
+        await message.answer(f'Добавлено в избранное vk_id={vk_profile_id}', reply_markup=kb_more())
     
     ## Добавить в черны список
     @router.message(MenuState.more, F.text == 'В черный список')
     async def add_to_black_list(message: Message, state: FSMContext) -> None:
-        # запоминаем данные кто добавляет и кого нужно добавить в черный список
         tg_user_id = message.from_user.id
-        vk_profile_id = 123456
-        # записываем в БД черный список
+
+        data = await state.get_data()
+        vk_profile_id = data.get("current_vk_profile_id")
+
+        if not vk_profile_id:
+            await message.answer("Сначала нажмите «Далее», чтобы выбрать кандидата.", reply_markup=kb_more())
+            return
+
         await user_repo.add_blacklist(tg_user_id=tg_user_id, vk_profile_id=vk_profile_id)
-        await message.answer(f'Добавлен в чернй список vk_id={tg_user_id}', reply_markup=kb_more())
-    
+        await message.answer(f'Добавлен в черный список vk_id={vk_profile_id}', reply_markup=kb_more())
+   
     ## Показать всех в избранном и перейти в меню действий с избранным
     @router.message(MenuState.more, F.text == 'Показать избранное')
     async def show_all_favorite(message: Message, state: FSMContext) -> None:
@@ -265,12 +299,12 @@ def setup_handlers(user_repo: InMemoryUserRepo) -> Router:
     # Callback: просмотр анкеты из избранного
     @router.callback_query(F.data.startswith('fav_view:'))
     async def fav_view_callback(callback: CallbackQuery, state: FSMContext) -> None:
-        vk_id = int(callback.data.split(':')[1])
+        vk_profile_id = int(callback.data.split(':')[1])
         # заглушка — показываем анкету
         await callback.message.answer(
             f'Анкета VK пользователя\n'
-            f'ID: {vk_id}\n'
-            f'Ссылка: vk.com/id{vk_id}'
+            f'ID: {vk_profile_id}\n'
+            f'Ссылка: vk.com/id{vk_profile_id}'
         )
         await callback.answer()
 
@@ -305,11 +339,11 @@ def setup_handlers(user_repo: InMemoryUserRepo) -> Router:
     # Callback: удаление из избранного
     @router.callback_query(F.data.startswith('fav_del:'))
     async def fav_del_callback(callback: CallbackQuery, state: FSMContext) -> None:
-        vk_id = int(callback.data.split(':')[1])
+        vk_profile_id = int(callback.data.split(':')[1])
         tg_user_id = callback.from_user.id
 
         # удаляем из БД по VK ID
-        await user_repo.remove_favorite(tg_user_id=tg_user_id, vk_profile_id=vk_id)
+        await user_repo.remove_favorite(tg_user_id=tg_user_id, vk_profile_id=vk_profile_id)
 
         # показываем обновленный список
         vk_ids = await user_repo.list_favorites(tg_user_id=tg_user_id)
@@ -327,7 +361,7 @@ def setup_handlers(user_repo: InMemoryUserRepo) -> Router:
             'Кликните на VK ID для удаления из избранного:',
             reply_markup=kb_favorites_delete_inline(vk_ids)
         )
-        await callback.answer(f'vk_id={vk_id} удалён из избранного')
+        await callback.answer(f'vk_id={vk_profile_id} удалён из избранного')
 
     # Вернуться из режима удаления в список избранного
     @router.message(MenuState.favorites_delete, F.text == 'Назад')
