@@ -9,6 +9,9 @@ load_dotenv()
 TG_TOKEN = os.getenv('TG_TOKEN')
 VK_API_VERSION = os.getenv('VK_API_VERSION')
 
+# Режим распознавания лиц (True — InsightFace, False — отбор по лайкам)
+USE_INSIGHTFACE: bool = os.getenv('USE_INSIGHTFACE', 'true').lower() in ('true', '1', 'yes')
+
 # Путь для сохранения данных и результатов обработки - не пушится
 BASE_PATH: Path = Path(__file__).resolve().parents[2]
 DATA_PATH = BASE_PATH / 'data'

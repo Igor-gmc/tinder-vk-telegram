@@ -1,9 +1,11 @@
 # обработчики: /start, токен, фильтры, навигация, избранное
 
 import asyncio
+from pathlib import Path
 
 from src.application.services.auth_service import AuthService
-from src.application.services import auth_service
+from src.application.services.dating_service import DatingService
+from src.application.services.photo_processing_service import PhotoProcessingService
 from src.presentation.tg.states import AuthState, FilterState, MenuState
 from src.core.exceptions import VkApiError
 from src.presentation.tg.keyboards import (
@@ -14,11 +16,16 @@ from src.infrastructure.db.repositories import InMemoryUserRepo
 
 from aiogram import Router, F
 from aiogram.filters import CommandStart
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InputMediaPhoto, FSInputFile
 from aiogram.fsm.context import FSMContext
 
 
-def setup_handlers(user_repo: InMemoryUserRepo, auth_service: AuthService) -> Router:
+def setup_handlers(
+        user_repo: InMemoryUserRepo,
+        auth_service: AuthService,
+        dating_service: DatingService,
+        photo_service: PhotoProcessingService
+) -> Router:
     router = Router()
 
     # функция для реагирования на команду /start
@@ -124,7 +131,7 @@ def setup_handlers(user_repo: InMemoryUserRepo, auth_service: AuthService) -> Ro
         await state.update_data(filter_city=city)
 
         await state.set_state(FilterState.waiting_gender)
-        await message.answer("Шаг 2/4: Укажите пол (1=Муж, 2=Жен)")
+        await message.answer("Шаг 2/4: Укажите пол для поиска (1=Жен, 2=Муж)")
 
     @router.message(FilterState.waiting_gender)
     async def got_gender(message: Message, state: FSMContext) -> None:
@@ -211,10 +218,91 @@ def setup_handlers(user_repo: InMemoryUserRepo, auth_service: AuthService) -> Ro
         await message.answer(
             "Фильтры настроены ✅\n"
             f"Город: {city}\n"
-            f"Пол: {gender}\n"
+            f"Пол: {'Жен' if gender == 1 else 'Муж'}\n"
             f"Возраст: от {age_from} до {age_to}",
             reply_markup=kb_main()
         )
+
+    # Вспомогательная функция — показать карточку кандидата
+    MAX_SKIP = 10  # максимум пропусков кандидатов без фото подряд
+
+    async def show_candidate_card(
+            message: Message, state: FSMContext, vk_id: int,
+            direction: str = 'next', skip_count: int = 0,
+    ) -> None:
+        """
+        Показывает карточку кандидата: профиль + фото.
+        Если фото нет — автопропуск к следующему/предыдущему.
+        """
+        tg_user_id = message.from_user.id
+        await state.update_data(current_vk_profile_id=vk_id)
+
+        # получаем профиль и фото
+        profile, photos = await dating_service.get_candidate_card(tg_user_id)
+
+        # скачиваем и обрабатываем фото если ещё не готовы
+        if not photos:
+            user = await user_repo.get_or_create_user(tg_user_id)
+            if user.vk_access_token:
+                try:
+                    photos = await photo_service.fetch_and_save_photos(
+                        access_token=user.vk_access_token,
+                        vk_user_id=vk_id,
+                    )
+                except VkApiError:
+                    photos = []
+
+        local_photos = [p for p in photos if p.local_path and Path(p.local_path).exists()]
+
+        # если фото нет — пропускаем кандидата автоматически
+        if not local_photos:
+            if skip_count >= MAX_SKIP:
+                await message.answer(
+                    "Не удалось найти кандидатов с фото. Попробуйте изменить фильтры.",
+                    reply_markup=kb_main()
+                )
+                return
+
+            try:
+                if direction == 'next':
+                    next_vk_id = await dating_service.next_candidate(tg_user_id)
+                else:
+                    next_vk_id = await dating_service.prev_candidate(tg_user_id)
+            except VkApiError:
+                next_vk_id = None
+
+            if not next_vk_id or next_vk_id == vk_id:
+                await message.answer(
+                    "Не удалось найти кандидатов с фото. Попробуйте изменить фильтры.",
+                    reply_markup=kb_main()
+                )
+                return
+
+            await show_candidate_card(message, state, next_vk_id, direction, skip_count + 1)
+            return
+
+        # формируем текст карточки
+        if profile:
+            name = f"{profile.first_name} {profile.last_name}".strip()
+            link = f"vk.com/{profile.domain}" if profile.domain else f"vk.com/id{vk_id}"
+            text = f"{name}\n{link}"
+        else:
+            text = f"vk.com/id{vk_id}"
+
+        # отправляем фото
+        if len(local_photos) >= 2:
+            media = []
+            for i, photo in enumerate(local_photos):
+                inp = FSInputFile(photo.local_path)
+                if i == 0:
+                    media.append(InputMediaPhoto(media=inp, caption=text))
+                else:
+                    media.append(InputMediaPhoto(media=inp))
+            await message.answer_media_group(media=media)
+            await message.answer("Выберите действие:", reply_markup=kb_main())
+        else:
+            inp = FSInputFile(local_photos[0].local_path)
+            await message.answer_photo(photo=inp, caption=text, reply_markup=kb_main())
 
     # Меню Главное MenuState.main
     ## Переход в меню Дополнительно
@@ -223,19 +311,40 @@ def setup_handlers(user_repo: InMemoryUserRepo, auth_service: AuthService) -> Ro
         await state.set_state(MenuState.more)
         await message.answer('Дополнительные действия', reply_markup=kb_more())
 
-    ## Вернуться в главное меню при нажатии Далее
+    ## Показать следующего кандидата
     @router.message(MenuState.main, F.text == 'Далее')
     async def main_next(message: Message, state: FSMContext) -> None:
-        # тут будет код пролистывания вперед
-        vk_profile_id = 777
-        await state.update_data(current_vk_profile_id=vk_profile_id)
-        await message.answer('Главное меню', reply_markup=kb_main())
+        tg_user_id = message.from_user.id
+        try:
+            vk_id = await dating_service.next_candidate(tg_user_id)
+        except VkApiError as e:
+            await message.answer(f"Ошибка VK: {e.msg}", reply_markup=kb_main())
+            return
 
-    ## Вернуться в главное меню при нажатии Назад
+        if not vk_id:
+            await message.answer("Кандидаты не найдены. Проверьте фильтры и попробуйте снова.", reply_markup=kb_main())
+            return
+
+        await show_candidate_card(message, state, vk_id, direction='next')
+
+        # фоновая предзагрузка следующих 5 анкет
+        asyncio.create_task(dating_service.preload_ahead(tg_user_id))
+
+    ## Показать предыдущего кандидата
     @router.message(MenuState.main, F.text == 'Предыдущий')
     async def main_prev(message: Message, state: FSMContext) -> None:
-        # тут будет код пролистывания назад
-        await message.answer('Главное меню', reply_markup=kb_main())
+        tg_user_id = message.from_user.id
+        try:
+            vk_id = await dating_service.prev_candidate(tg_user_id)
+        except VkApiError as e:
+            await message.answer(f"Ошибка VK: {e.msg}", reply_markup=kb_main())
+            return
+
+        if not vk_id:
+            await message.answer("Вы в начале списка.", reply_markup=kb_main())
+            return
+
+        await show_candidate_card(message, state, vk_id, direction='prev')
 
     # Меню Дополнительно MenuState.more
     ## Вернуться на уровень выше
@@ -300,12 +409,58 @@ def setup_handlers(user_repo: InMemoryUserRepo, auth_service: AuthService) -> Ro
     @router.callback_query(F.data.startswith('fav_view:'))
     async def fav_view_callback(callback: CallbackQuery, state: FSMContext) -> None:
         vk_profile_id = int(callback.data.split(':')[1])
-        # заглушка — показываем анкету
-        await callback.message.answer(
-            f'Анкета VK пользователя\n'
-            f'ID: {vk_profile_id}\n'
-            f'Ссылка: vk.com/id{vk_profile_id}'
-        )
+        tg_user_id = callback.from_user.id
+
+        # профиль и фото из репозитория
+        profile = await user_repo.get_profile(vk_profile_id)
+        photos = await user_repo.get_photos(vk_profile_id)
+
+        # если фото ещё нет — попробуем скачать
+        if not photos:
+            user = await user_repo.get_or_create_user(tg_user_id)
+            if user.vk_access_token:
+                try:
+                    photos = await photo_service.fetch_and_save_photos(
+                        access_token=user.vk_access_token,
+                        vk_user_id=vk_profile_id,
+                    )
+                except VkApiError:
+                    photos = []
+
+        # текст карточки
+        if profile:
+            name = f"{profile.first_name} {profile.last_name}".strip()
+            link = f"vk.com/{profile.domain}" if profile.domain else f"vk.com/id{vk_profile_id}"
+            text = f"{name}\n{link}"
+        else:
+            text = f"vk.com/id{vk_profile_id}"
+
+        # отправляем фото
+        local_photos = [p for p in photos if p.local_path and Path(p.local_path).exists()]
+        if local_photos:
+            if len(local_photos) >= 2:
+                media = []
+                for i, photo in enumerate(local_photos):
+                    inp = FSInputFile(photo.local_path)
+                    if i == 0:
+                        media.append(InputMediaPhoto(media=inp, caption=text))
+                    else:
+                        media.append(InputMediaPhoto(media=inp))
+                await callback.message.answer_media_group(media=media)
+            else:
+                inp = FSInputFile(local_photos[0].local_path)
+                await callback.message.answer_photo(photo=inp, caption=text)
+        else:
+            await callback.message.answer(text)
+
+        # повторно показываем список избранного
+        vk_ids = await user_repo.list_favorites(tg_user_id=tg_user_id)
+        if vk_ids:
+            await callback.message.answer(
+                'Кликните на VK ID для просмотра анкеты:',
+                reply_markup=kb_favorites_inline(vk_ids)
+            )
+
         await callback.answer()
 
     # Меню управления избранным MenuState.favorites

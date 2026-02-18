@@ -1,6 +1,8 @@
 # Bot/Dispatcher, регистрация роутеров
 
 from src.application.services.auth_service import AuthService
+from src.application.services.dating_service import DatingService
+from src.application.services.photo_processing_service import PhotoProcessingService
 from src.infrastructure.db.repositories import InMemoryUserRepo
 from src.infrastructure.vk.client import VkClient
 from src.infrastructure.vk.methods import VkMethods
@@ -30,7 +32,18 @@ def setup_bot(token: str) -> tuple[Dispatcher, Bot]:
     # Сервис авторизации: валидирует и сохраняет
     auth_service = AuthService(vk=vk_methods, user_repo=user_repo)
 
-    router = setup_handlers(user_repo=user_repo, auth_service=auth_service)
+    # Сервис обработки фото: скачивание + (позже) InsightFace
+    photo_service = PhotoProcessingService(vk=vk_methods, user_repo=user_repo)
+
+    # Сервис знакомств: поиск кандидатов, навигация по очереди
+    dating_service = DatingService(vk=vk_methods, user_repo=user_repo, _photo_service=photo_service)
+
+    router = setup_handlers(
+        user_repo=user_repo,
+        auth_service=auth_service,
+        dating_service=dating_service,
+        photo_service=photo_service,
+    )
     dp.include_router(router=router)
 
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode="HTML"))
