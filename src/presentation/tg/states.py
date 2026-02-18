@@ -13,3 +13,9 @@ class FilterState(StatesGroup):
     waiting_gender = State()
     waiting_age_from = State()
     waiting_age_to = State()
+
+class MenuState(StatesGroup):
+    main = State()
+    more = State()
+    favorites = State()
+    favorites_delete = State()

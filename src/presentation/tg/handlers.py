@@ -2,13 +2,16 @@
 
 import asyncio
 
-from src.presentation.tg.states import AuthState, FilterState
-from src.presentation.tg.keyboards import kb_start, kb_after_auth
+from src.presentation.tg.states import AuthState, FilterState, MenuState
+from src.presentation.tg.keyboards import (
+    kb_favorite_item, kb_main, kb_more, kb_start, kb_after_auth,
+    kb_favorites_inline, kb_favorites_delete_inline, kb_favorite_back
+)
 from src.infrastructure.db.repositories import InMemoryUserRepo
 
 from aiogram import Router, F
-from aiogram.filters import CommandStart
-from aiogram.types import Message
+from aiogram.filters import CommandStart, Command
+from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 
@@ -81,7 +84,7 @@ def setup_handlers(user_repo: InMemoryUserRepo) -> Router:
         await message.answer("Чтобы настроить фильтры для поиска кандидатов нажмите «Настроить фильтры»")
 
     # старт настройки фильтров
-    @router.message(F.text == "Настроить фильтры")
+    @router.message(F.text == "Настроить фильтры поиска")
     async def start_filters(message: Message, state: FSMContext) -> None:
         await state.clear()
         await state.set_state(FilterState.waiting_city)
@@ -182,12 +185,166 @@ def setup_handlers(user_repo: InMemoryUserRepo) -> Router:
         )
 
         await state.clear()
-
+        await state.set_state(MenuState.main)
         await message.answer(
             "Фильтры настроены ✅\n"
             f"Город: {city}\n"
             f"Пол: {gender}\n"
-            f"Возраст: от {age_from} до {age_to}"
+            f"Возраст: от {age_from} до {age_to}",
+            reply_markup=kb_main()
+        )
+
+    # Меню Главное MenuState.main
+    ## Переход в меню Дополнительно
+    @router.message(MenuState.main, F.text == 'Дополнительно')
+    async def menu_more(message: Message, state: FSMContext) -> None:
+        await state.set_state(MenuState.more)
+        await message.answer('Дополнительные действия', reply_markup=kb_more())
+
+    ## Вернуться в главное меню при нажатии Далее
+    @router.message(MenuState.main, F.text == 'Далее')
+    async def main_next(message: Message, state: FSMContext) -> None:
+        # тут будет код пролистывания вперед
+        await message.answer('Главное меню', reply_markup=kb_main())
+
+    ## Вернуться в главное меню при нажатии Назад
+    @router.message(MenuState.main, F.text == 'Предыдущий')
+    async def main_prev(message: Message, state: FSMContext) -> None:
+        # тут будет код пролистывания назад
+        await message.answer('Главное меню', reply_markup=kb_main())
+
+    # Меню Дополнительно MenuState.more
+    ## Вернуться на уровень выше
+    @router.message(MenuState.more, F.text == "Назад")
+    async def back_from_more(message: Message, state: FSMContext) -> None:
+        await state.set_state(MenuState.main)
+        await message.answer("Главное меню:", reply_markup=kb_main())
+
+    ## Добавить в избранное
+    @router.message(MenuState.more, F.text == 'В избранное')
+    async def add_favorite(message: Message, state: FSMContext) -> None:
+        # запоминаем данные кто добавляет и кого добавляют
+        tg_user_id = message.from_user.id
+        vk_profile_id = 123456
+        # записываем добавленного в БД
+        await user_repo.add_favorite(tg_user_id=tg_user_id, vk_profile_id=vk_profile_id)
+        await message.answer(f'Добавлено в избранное vk_id={tg_user_id}', reply_markup=kb_more())
+    
+    ## Добавить в черны список
+    @router.message(MenuState.more, F.text == 'В черный список')
+    async def add_to_black_list(message: Message, state: FSMContext) -> None:
+        # запоминаем данные кто добавляет и кого нужно добавить в черный список
+        tg_user_id = message.from_user.id
+        vk_profile_id = 123456
+        # записываем в БД черный список
+        await user_repo.add_blacklist(tg_user_id=tg_user_id, vk_profile_id=vk_profile_id)
+        await message.answer(f'Добавлен в чернй список vk_id={tg_user_id}', reply_markup=kb_more())
+    
+    ## Показать всех в избранном и перейти в меню действий с избранным
+    @router.message(MenuState.more, F.text == 'Показать избранное')
+    async def show_all_favorite(message: Message, state: FSMContext) -> None:
+        # запоминаем данные кто вызывает избранное
+        tg_user_id = message.from_user.id
+        # Ищем избранное
+        vk_ids = await user_repo.list_favorites(tg_user_id=tg_user_id)
+
+        if not vk_ids:
+            await message.answer('Список избранного пуст', reply_markup=kb_more())
+            return
+
+        # переходим в меню управления избранным
+        await state.set_state(MenuState.favorites)
+        # reply клавиатура с кнопками "Удалить из избранного" и "Назад"
+        await message.answer('Избранное:', reply_markup=kb_favorite_item())
+        # inline кнопки с VK ID для просмотра анкеты
+        await message.answer(
+            'Кликните на VK ID для просмотра анкеты:',
+            reply_markup=kb_favorites_inline(vk_ids)
+        )
+
+    # Callback: просмотр анкеты из избранного
+    @router.callback_query(F.data.startswith('fav_view:'))
+    async def fav_view_callback(callback: CallbackQuery, state: FSMContext) -> None:
+        vk_id = int(callback.data.split(':')[1])
+        # заглушка — показываем анкету
+        await callback.message.answer(
+            f'Анкета VK пользователя\n'
+            f'ID: {vk_id}\n'
+            f'Ссылка: vk.com/id{vk_id}'
+        )
+        await callback.answer()
+
+    # Меню управления избранным MenuState.favorites
+    ## Вернуться на уровень выше
+    @router.message(MenuState.favorites, F.text == 'Назад')
+    async def back_from_favorite(message: Message, state: FSMContext) -> None:
+        await state.set_state(MenuState.more)
+        await message.answer("Дополнительные действия:", reply_markup=kb_more())
+
+    ## Переход в режим удаления из избранного
+    @router.message(MenuState.favorites, F.text == 'Удалить из избранного')
+    async def delete_from_favorite(message: Message, state: FSMContext) -> None:
+        tg_user_id = message.from_user.id
+        vk_ids = await user_repo.list_favorites(tg_user_id=tg_user_id)
+
+        if not vk_ids:
+            await message.answer('Список избранного пуст', reply_markup=kb_more())
+            await state.set_state(MenuState.more)
+            return
+
+        # переходим в режим удаления
+        await state.set_state(MenuState.favorites_delete)
+        # reply клавиатура с кнопкой "Назад"
+        await message.answer('Режим удаления из избранного:', reply_markup=kb_favorite_back())
+        # inline кнопки с VK ID для удаления
+        await message.answer(
+            'Кликните на VK ID для удаления из избранного:',
+            reply_markup=kb_favorites_delete_inline(vk_ids)
+        )
+
+    # Callback: удаление из избранного
+    @router.callback_query(F.data.startswith('fav_del:'))
+    async def fav_del_callback(callback: CallbackQuery, state: FSMContext) -> None:
+        vk_id = int(callback.data.split(':')[1])
+        tg_user_id = callback.from_user.id
+
+        # удаляем из БД по VK ID
+        await user_repo.remove_favorite(tg_user_id=tg_user_id, vk_profile_id=vk_id)
+
+        # показываем обновленный список
+        vk_ids = await user_repo.list_favorites(tg_user_id=tg_user_id)
+
+        if not vk_ids:
+            # список пуст, возвращаемся в меню Дополнительно
+            await callback.message.edit_text('Список избранного пуст')
+            await callback.message.answer('Дополнительные действия:', reply_markup=kb_more())
+            await state.set_state(MenuState.more)
+            await callback.answer('Удалено')
+            return
+
+        # обновляем inline клавиатуру с оставшимися VK ID
+        await callback.message.edit_text(
+            'Кликните на VK ID для удаления из избранного:',
+            reply_markup=kb_favorites_delete_inline(vk_ids)
+        )
+        await callback.answer(f'vk_id={vk_id} удалён из избранного')
+
+    # Вернуться из режима удаления в список избранного
+    @router.message(MenuState.favorites_delete, F.text == 'Назад')
+    async def back_from_favorites_delete(message: Message, state: FSMContext) -> None:
+        tg_user_id = message.from_user.id
+        vk_ids = await user_repo.list_favorites(tg_user_id=tg_user_id)
+
+        if not vk_ids:
+            await state.set_state(MenuState.more)
+            await message.answer('Список избранного пуст. Дополнительные действия:', reply_markup=kb_more())
+            return
+
+        await state.set_state(MenuState.favorites)
+        await message.answer('Избранное:', reply_markup=kb_favorite_item())
+        await message.answer(
+            'Кликните на VK ID для просмотра анкеты:',
+            reply_markup=kb_favorites_inline(vk_ids)
         )
 
     return router
