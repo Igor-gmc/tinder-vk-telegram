@@ -1,6 +1,7 @@
 ﻿# ==============================
 #   ClaudeCode (Anthropic)
 # ==============================
+
 .claude/
 claude/
 claude_cache/
