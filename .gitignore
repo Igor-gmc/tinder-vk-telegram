@@ -338,7 +338,8 @@ site/
 *.db
 *.sqlite
 *.sqlite3
-
+.env
+/.venv
 # Hugging Face cache
 .cache/
 huggingface/
