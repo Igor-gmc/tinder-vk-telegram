@@ -1,0 +1,350 @@
+﻿# ==============================
+#   ClaudeCode (Anthropic)
+# ==============================
+.claude/
+claude/
+claude_cache/
+.claude-cache/
+.claude_history/
+.claude_history.json
+.claude.json
+claude.json
+claude_prompts/
+.claude_prompts/
+claude_tmp/
+.claude_tmp/
+*.prompt.md
+*.prompt
+*.claude-prompt
+
+# ==============================
+#   Codeium (если используется)
+# ==============================
+.codeium/
+.codeiumrc
+
+# ==============================
+#   Python
+# ==============================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# ==============================
+#   Environments
+# ==============================
+venv/
+../.env
+.env.local
+.env.*.local
+*.conda
+*.yml
+
+# ==============================
+#   macOS
+# ==============================
+.DS_Store
+
+# ==============================
+#   VSCode
+# ==============================
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# ==============================
+#   Other
+# ==============================
+*.bak
+*.tmp
+*.swp
+*.lock
+
+intests
+.intests/*
+
+# ============================================================================
+# ВАЖНО: Этот файл НЕ игнорируется
+# ============================================================================
+!README.md
+!.gitignore
+
+# ============================================================================
+# Секреты и конфиденциальные данные
+# ============================================================================
+../.env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets/
+credentials/
+
+# ============================================================================
+# Датасеты и данные
+# ============================================================================
+dataset.csv
+*.csv
+!requirements.txt
+data/
+datasets/
+raw_data/
+
+# ============================================================================
+# Модели и веса
+# ============================================================================
+# Fine-tuned модели
+qwen2-finetuned/
+qwen2-finetuned-final/
+llama-finetuned/
+llama-finetuned-final/
+*-finetuned/
+*-finetuned-final/
+
+# Веса моделей
+*.bin
+*.safetensors
+*.gguf
+*.pt
+*.pth
+*.ckpt
+models/
+checkpoints/
+
+# Подготовленные датасеты
+train_dataset/
+test_dataset/
+df_formatted.pkl
+system_instruction.txt
+
+# ============================================================================
+# Qdrant и векторные БД
+# ============================================================================
+qdrant_data/
+qdrant_storage/
+.qdrant/
+embeddings/
+vector_db/
+
+# ============================================================================
+# Результаты и логи
+# ============================================================================
+results/
+outputs/
+logs/
+results_*.csv
+comparison_*.csv
+*.log
+
+# Графики и визуализации
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+!docs/*.png
+!docs/*.jpg
+
+# ============================================================================
+# Python
+# ============================================================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+!docs/*.ipynb
+!examples/*.ipynb
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath
+*.sage.py
+
+# Spyder
+.spyderproject
+.spyproject
+
+# Rope
+.ropeproject
+
+# mkdocs
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# pytype
+.pytype/
+
+# ============================================================================
+# IDE и редакторы
+# ============================================================================
+# VS Code
+.vscode/
+*.code-workspace
+.history/
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+.vim/
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+
+# Eclipse
+.project
+.pydevproject
+.settings/
+
+# ============================================================================
+# Операционные системы
+# ============================================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
+.Trash-*
+
+# ============================================================================
+# Временные файлы
+# ============================================================================
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+tmp/
+temp/
+cache/
+
+# ============================================================================
+# Документация (генерируемая)
+# ============================================================================
+docs/_build/
+docs/.doctrees/
+site/
+
+# ============================================================================
+# Прочее
+# ============================================================================
+# Архивы
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Hugging Face cache
+.cache/
+huggingface/
+
+# Transformers cache
+transformers_cache/
+
+nul
+nul-

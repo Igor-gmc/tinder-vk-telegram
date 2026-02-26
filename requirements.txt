@@ -1,0 +1,31 @@
+# ЗАВИСИМОСТИ
+aiogram == 3.25.0
+aiohttp == 3.13.3
+aiofiles == 25.1.0
+python-dotenv == 1.2.1
+pydantic == 2.12.5
+
+# РАСПОЗНАВАНИЕ ЛИЦ (USE_INSIGHTFACE = true)
+
+insightface == 0.7.3
+onnxruntime == 1.24.1
+opencv-python == 4.13.0.92
+numpy == 2.4.2
+
+# БАЗА ДАННЫХ
+alembic==1.18.4
+asyncpg==0.31.0
+colorama==0.4.6
+greenlet==3.3.2
+iniconfig==2.3.0
+Mako==1.3.10
+MarkupSafe==3.0.3
+packaging==26.0
+pluggy==1.6.0
+psycopg2-binary==2.9.11
+Pygments==2.19.2
+pytest==9.0.2
+pytest-asyncio==1.3.0
+python-dotenv==1.2.1
+SQLAlchemy==2.0.46
+typing_extensions==4.15.0
