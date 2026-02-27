@@ -1,152 +1,227 @@
-# VK Dating Telegram Bot (локальный проект)
+# VK Dating Telegram Bot
 
-## 1. Описание
+## 1. Описание проекта
+
 Telegram-бот на Python, который подбирает людей для знакомств во ВКонтакте (vk.com) по критериям пользователя.
-Проект запускается и работает только локально.
 
-Ключевые особенности:
-- При старте бот просит у пользователя VK токен: сообщение "Введите токен vk".
-- Бот тестирует соединение с VK (валидирует токен).
-- После успешной проверки появляется кнопка "Настроить фильтры поиска".
-- Фильтры настраиваются через 4 вопроса:
-  1) Укажите город для поиска
-  2) Укажите пол для поиска кандидатов
-  3) Укажите интересующий начальный возраст кандидатов
-  4) Укажите интересующий максимальный возраст кандидатов
-- Фотографии кандидатов отбираются с помощью распознавания лиц (InsightFace / ONNXRuntime, CPU) **или** по количеству лайков (если InsightFace отключён):
-  - Детектор SCRFD — поиск лиц, фильтрация (ровно одно лицо, без размытия).
-  - Эмбеддинги ArcFace (512-d) — проверка, что на топ-3 фото один и тот же человек.
-  - Режим переключается переменной `USE_INSIGHTFACE` в `.env` (true/false).
-  - Файлы (JPEG/PNG) хранятся на диске (`data/photos/`).
-- После настройки фильтров доступен главный экран с навигацией по кандидатам и дополнительными действиями:
-  - Предыдущий
-  - Далее
-  - Дополнительно → В избранное / В чёрный список / Показать избранное → Удалить из избранного / Настроить фильтры
-- Кнопок лайка нет.
+Возможности:
+- Авторизация через VK токен с валидацией.
+- Настройка фильтров поиска: город, пол, возраст.
+- Просмотр карточек кандидатов с навигацией (Далее / Предыдущий).
+- Отбор фотографий через распознавание лиц (InsightFace, SCRFD + ArcFace) **или** по количеству лайков.
+- Избранное и чёрный список.
+- Хранение данных в PostgreSQL (с fallback на InMemory при отсутствии `DATABASE_URL`).
+- Предзагрузка фото для следующих кандидатов в фоне.
+
+Стек: Python 3.11+, aiogram 3, SQLAlchemy 2 (async), PostgreSQL, Alembic, InsightFace/ONNXRuntime (опционально).
 
 ---
 
-## 2. Архитектура кнопок (по ТЗ пользователя)
-|- Старт
-|- Настроить фильтры
-|- Кнопки главного экрана
-   |- Предыдущий
-   |- Далее
-   |- Дополнительно
-      |- В избранное
-      |- В черный список
-      |- Назад
-      |- Показать избранное
-         |- Удалить из избранного
-         |- Назад
-      |- Настроить фильтры
+## 2. Архитектура
 
-Примечания:
-- "Старт" — это стартовая точка диалога (/start) и стартовая кнопка/экран.
-- "Настроить фильтры" открывает режим опроса (4 шага).
-- "Дополнительно" — вложенное меню.
+### 2.1 Слои приложения
+
+```
+Presentation (Telegram)     — UI, FSM-состояния, клавиатуры, обработчики
+        ↓
+Application (Services)      — бизнес-логика: авторизация, поиск, фото, навигация
+        ↓
+Infrastructure              — VK API, БД (PostgreSQL/InMemory), Vision (InsightFace)
+        ↓
+Core                        — конфигурация, логирование, исключения
+```
+
+- **Presentation** (`src/presentation/tg/`) — aiogram: bot.py, handlers.py, keyboards.py, states.py.
+- **Application** (`src/application/services/`) — AuthService, DatingService, PhotoProcessingService.
+- **Infrastructure** (`src/infrastructure/`) — VK client, PostgresUserRepo / InMemoryUserRepo, FaceDetector.
+- **Core** (`src/core/`) — config.py, log_setup.py, exceptions.py.
+
+### 2.2 Хранение данных
+
+Бот автоматически выбирает хранилище при старте:
+- Если `DATABASE_URL` задан в `.env` → **PostgreSQL** (через SQLAlchemy async + asyncpg).
+- Если не задан → **InMemoryUserRepo** (данные теряются при перезапуске).
+
+Обе реализации реализуют единый интерфейс `UserRepo` (Protocol, 18 async-методов).
+
+Таблицы PostgreSQL: `users`, `profiles`, `photos`, `queue`, `favorites`, `blacklist`.
+Миграции управляются через Alembic (`alembic/`).
+
+Файлы фотографий (JPEG/PNG) хранятся на диске в `data/photos/<vk_user_id>/`, в БД — только пути и метаданные.
+
+### 2.3 Архитектура кнопок
+
+```
+Старт
+Настроить фильтры поиска
+Главный экран
+├── Предыдущий
+├── Далее
+└── Дополнительно
+    ├── В избранное
+    ├── В черный список
+    ├── Показать избранное
+    │   ├── [inline-кнопки VK ID] → просмотр анкеты
+    │   ├── Удалить из избранного
+    │   │   └── [inline-кнопки VK ID] → удаление
+    │   └── Назад
+    ├── Настроить фильтры поиска
+    └── Назад
+```
 
 ---
 
-## 3. Основные сценарии работы
+## 3. Инструкция по использованию
 
-### 3.1 Старт и ввод токена
-1) Пользователь нажимает "Старт" или вводит `/start`.
-2) Бот отвечает: "Введите токен vk".
-3) Пользователь отправляет токен текстом.
-4) Затем бот запрашивает VK ID → "Введите ваш vk id" и пользователь отправляет ID.
-5) Бот тестирует соединение с VK:
-   - если токен валиден → "Токен принят. Соединение с VK успешно." и показывает кнопку "Настроить фильтры поиска".
-   - если токен невалиден → "Ошибка токена. Повторите ввод." и снова ждёт токен.
+### 3.1 Переменные окружения (.env)
 
-### 3.2 Настройка фильтров
-1) Пользователь нажимает "Настроить фильтры поиска".
-2) Бот задаёт вопросы по очереди:
-   1) "Укажите город для поиска"
-   2) "Укажите пол для поиска кандидатов"
-   3) "Укажите интересующий начальный возраст кандидатов"
-   4) "Укажите интересующий максимальный возраст кандидатов"
-3) После ввода всех 4 параметров:
-   - бот сохраняет фильтры в хранилище,
-   - показывает главный экран (кнопки навигации "Предыдущий/Далее/Дополнительно").
+Создайте файл `.env` в корне проекта (по образцу ниже). Файл **не коммитится** в git.
 
-### 3.3 Просмотр кандидатов
-- "Далее" → показать следующего кандидата.
-- "Предыдущий" → показать предыдущего кандидата (по локальной истории показов).
+| Переменная | Обязательна | Описание | Пример |
+|---|---|---|---|
+| `TG_TOKEN` | да | Токен Telegram бота (от @BotFather) | `123456:ABC-DEF...` |
+| `VK_API_VERSION` | да | Версия VK API | `5.131` |
+| `DATABASE_URL` | нет | URL подключения к PostgreSQL. Если не задан — данные хранятся в памяти | `postgresql+asyncpg://user:pass@localhost:5432/dbname` |
+| `USE_INSIGHTFACE` | нет | Распознавание лиц: `true` или `false` (по умолчанию `true`) | `false` |
+| `INSIGHTFACE_MODEL` | нет | Модель InsightFace (по умолчанию `buffalo_l`) | `buffalo_l` |
+| `PHOTO_DIR` | нет | Путь для скачанных фото (по умолчанию `./data/photos`) | `./data/photos` |
+| `PHOTO_BATCH_SIZE` | нет | Сколько фото скачивать для анализа (по умолчанию `10`) | `10` |
+| `PHOTO_BUFFER_AHEAD` | нет | Сколько кандидатов предзагружать впереди курсора (по умолчанию `5`) | `5` |
+| `CLEAN_DB_ON_START` | нет | Очистить все таблицы БД при старте: `true` или `false` (по умолчанию `false`) | `false` |
+
+Пример `.env`:
+```
+VK_API_VERSION=5.131
+TG_TOKEN=ваш_токен_телеграм_бота
+
+DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/postgres
+
+USE_INSIGHTFACE=false
+INSIGHTFACE_MODEL=buffalo_l
+
+PHOTO_DIR=./data/photos
+PHOTO_BATCH_SIZE=10
+PHOTO_BUFFER_AHEAD=5
+
+CLEAN_DB_ON_START=false
+```
+
+### 3.2 Включение и отключение распознавания лиц
+
+Переменная `USE_INSIGHTFACE` в `.env` переключает режим отбора фотографий:
+
+| Значение | Поведение |
+|---|---|
+| `true` | Фото проходят через InsightFace: детекция лиц → фильтрация → проверка blur → эмбеддинги → группировка "один человек" → топ-3. Требуется установка дополнительных пакетов (см. раздел 4). |
+| `false` | Фото отбираются по количеству лайков — берутся топ-3 самых залайканных. Дополнительные пакеты не нужны. |
+
+Переключение: измените значение в `.env` и перезапустите бота.
+
+### 3.3 Логика распознавания лиц (InsightFace)
+
+При `USE_INSIGHTFACE=true` фотографии кандидата проходят через пайплайн:
+
+**Шаг 1. Скачивание**
+- Из VK загружаются фото профиля (API `photos.get`, альбом профиля).
+- Фото сортируются по лайкам, скачиваются топ-N (настраивается `PHOTO_BATCH_SIZE`, по умолчанию 10).
+- Скачивание параллельное через `asyncio.gather`.
+- Файлы сохраняются в `data/photos/<vk_user_id>/`.
+
+**Шаг 2. Детекция лиц (SCRFD)**
+- Каждое фото проходит через детектор SCRFD (модель `buffalo_l`).
+- Фильтрация: ровно 1 лицо на фото, уверенность детектора >= 0.5, размер лица >= 50px.
+- Фото без лица, с несколькими лицами, мелким лицом или низкой уверенностью — отклоняются.
+- Причина отклонения сохраняется: `no_face`, `multi_face`, `small_face`, `low_score`.
+
+**Шаг 3. Оценка резкости (Variance of Laplacian)**
+- Из фото вырезается кроп лица по bbox.
+- Вычисляется variance of Laplacian — чем выше, тем резче.
+- Если score < 50.0 — фото отклоняется как размытое (`blurry`).
+
+**Шаг 4. Эмбеддинги и группировка (ArcFace)**
+- Для каждого прошедшего фото извлекается 512-мерный эмбеддинг (ArcFace, L2-нормированный).
+- Фото группируются по cosine similarity (порог >= 0.4 = "один и тот же человек").
+- Если фото совпадает с существующей группой — добавляется в неё.
+- Если не совпадает ни с одной — создаётся новая группа.
+
+**Шаг 5. Выбор топ-3**
+- Берётся самая большая группа (один человек с наибольшим числом фото).
+- Внутри группы фото ранжируются по лайкам.
+- Выбираются топ-3 (`status = selected`).
+- Остальные фото получают `status = accepted` (прошли фильтры) или `rejected` (не прошли).
+
+**Fallback:** если `USE_INSIGHTFACE=false`, InsightFace не установлен, или скачано менее 3 фото — берутся топ-3 по лайкам.
+
+**Оптимизации:**
+- InsightFace работает в `thread pool executor` — не блокирует event loop aiogram.
+- При старте бота детектор прогревается (`warm_up_detector`), чтобы первый запрос не ждал загрузки модели (~280 МБ).
+- Фоновая предзагрузка фото для следующих кандидатов (`PHOTO_BUFFER_AHEAD`).
+
+### 3.4 Использование бота в Telegram (пошаговая инструкция)
+
+#### Авторизация
+
+1. Откройте бота в Telegram и нажмите `/start`.
+2. Бот ответит: **"Чтобы начать нажмите Старт"**. Нажмите кнопку **Старт**.
+3. Бот попросит: **"Шаг 1/2: Введите токен VK"**. Отправьте ваш VK access token текстом.
+4. Бот попросит: **"Шаг 2/2: Введите VK_ID"**. Отправьте ваш числовой VK ID.
+5. Бот проверит токен через VK API (`users.get`) и сверит владельца:
+   - Успех: **"Токен валиден ✅ Данные авторизации записаны ✅"** → появляется кнопка **Настроить фильтры поиска**.
+   - Ошибка: сообщение об ошибке VK, бот просит ввести токен заново.
+
+#### Настройка фильтров
+
+1. Нажмите **Настроить фильтры поиска**.
+2. Бот задаёт 4 вопроса по очереди:
+   - **"Шаг 1/4: Введите ваш город для поиска кандидатов"** — введите название города (например, Москва).
+   - **"Шаг 2/4: Укажите пол для поиска (1=Жен, 2=Муж)"** — введите `1` или `2`.
+   - **"Шаг 3/4: Введите возраст ОТ (число, не менее 18)"** — введите число от 18 до 100.
+   - **"Шаг 4/4: Введите возраст ДО (число)"** — введите число (не меньше возраста ОТ).
+3. Бот подтвердит: **"Фильтры настроены ✅"** с перечислением параметров.
+4. Появляется главный экран с кнопками навигации.
+
+#### Просмотр кандидатов
+
+На главном экране доступны кнопки:
+
+| Кнопка | Действие |
+|---|---|
+| **Далее** | Показать следующего кандидата. Если очередь пуста — бот выполнит поиск в VK по фильтрам. Если фото не готовы — появится "Ищу фото кандидата..." (сообщение удалится после загрузки). После показа запускается фоновая предзагрузка следующих кандидатов. |
+| **Предыдущий** | Показать предыдущего кандидата из истории просмотров. Если вы в начале списка — "Вы в начале списка." |
+| **Дополнительно** | Открыть меню дополнительных действий. |
+
 Карточка кандидата содержит:
 - Имя Фамилия
-- Ссылка на профиль VK
-- 3 лучшие фотографии (отобраны через InsightFace или по лайкам)
+- Ссылку на профиль VK (`vk.com/domain` или `vk.com/idXXXXX`)
+- До 3 фотографий (отобранных через InsightFace или по лайкам)
 
-### 3.4 Обработка фотографий
-Фотографии обрабатываются с предзагрузкой на 5 кандидатов вперёд, опережая курсор пользователя:
-1) Скачивание фото кандидата с VK (photos.get, сортировка по лайкам, параллельное скачивание).
-2) Если `USE_INSIGHTFACE=true` и скачано >= 3 фото:
-   - Детекция лиц (SCRFD) — отсев фото без лица или с несколькими лицами.
-   - Оценка резкости (variance of Laplacian) — отсев размытых фото.
-   - Вычисление эмбеддингов (ArcFace 512-d) — проверка, что на фото один и тот же человек.
-   - Выбор топ-3 фото (status = selected) для показа в карточке.
-   - InsightFace выполняется в thread pool executor (не блокирует event loop).
-3) Если `USE_INSIGHTFACE=false` или фото < 3:
-   - Берутся топ-3 фото по количеству лайков.
-4) Файлы сохраняются в `data/photos/<vk_user_id>/`.
-5) При старте бота детектор InsightFace прогревается (warm-up), чтобы первый запрос не ждал загрузки модели.
+Кандидаты без фото автоматически пропускаются (до 10 подряд).
 
-### 3.5 Дополнительные действия
-- "В избранное" → сохраняет текущего кандидата в избранное.
-- "В чёрный список" → добавляет текущего кандидата в чёрный список, чтобы больше не показывался.
-- "Показать избранное" → выводит список избранных; для каждого доступно "Удалить из избранного".
+#### Дополнительные действия
 
----
+В меню **Дополнительно**:
 
-## 4. Хранение состояния
+| Кнопка | Действие |
+|---|---|
+| **В избранное** | Добавить текущего кандидата в избранное. |
+| **В черный список** | Добавить текущего кандидата в чёрный список. Кандидат удаляется из очереди и больше не показывается. Курсор корректируется автоматически. |
+| **Показать избранное** | Показать список избранных (inline-кнопки с VK ID). Нажатие на VK ID → просмотр анкеты с фото. |
+| **Настроить фильтры поиска** | Перенастроить фильтры (очередь кандидатов сбрасывается). |
+| **Назад** | Вернуться на главный экран. |
 
-### Текущая реализация (InMemoryUserRepo — заглушка)
-Сейчас все данные хранятся в оперативной памяти (`src/infrastructure/db/repositories.py`).
-При перезапуске бота данные сбрасываются. Это MVP-заглушка для быстрой разработки бота.
+В меню **Показать избранное**:
 
-Данные в памяти:
-- `_users: Dict[int, UserDTO]` — пользователи Telegram (токен VK, фильтры, курсор)
-- `_favorites: Dict[int, set[int]]` — избранное (tg_user_id → set vk_id)
-- `_black_list: Dict[int, set[int]]` — чёрный список
-- `_queue: Dict[int, list[int]]` — очередь кандидатов из users.search
-- `_profiles: Dict[int, ProfileDTO]` — профили кандидатов VK
-- `_photos: Dict[int, list[PhotoDTO]]` — фото кандидатов VK (кэшируются после обработки)
-
-### Целевая реализация (PostgreSQL)
-Для production нужно реализовать `UserRepo` Protocol с PostgreSQL (см. раздел 8 "Задание для SQL-специалиста").
-
-Файлы фотографий (JPEG/PNG) хранятся на диске в `data/photos/`, в БД — только пути и метаданные.
+| Кнопка | Действие |
+|---|---|
+| **Удалить из избранного** | Переход в режим удаления: inline-кнопки с VK ID, нажатие удаляет из избранного. |
+| **Назад** | Вернуться в меню Дополнительно. |
 
 ---
 
-## 5. Ограничение VK users.search (1000 результатов)
-VK ограничивает выдачу поиска 1000 анкет.
-Планируется обход через стратегию сегментации по возрасту:
-- дробим возрастной диапазон на интервалы,
-- перебираем интервалы, пока не найдём подходящих кандидатов, которых нет в seen/blacklist,
-- при переполнении сегмента — дробим интервал ещё.
+## 4. Установка и запуск
 
-> **Статус:** пока не реализовано. Текущий поиск возвращает до 50 кандидатов за один запрос.
+### 4.1 Базовая установка (без распознавания лиц)
 
----
-
-## 6. Требования
-- Python 3.11+
-- Telegram Bot Token (в `.env`)
-- VK user token + VK ID (пользователь вводит в чат бота)
-- VK приложение (APP_ID + APP_URL для получения токена пользователем)
-
-Опционально (для режима распознавания лиц, `USE_INSIGHTFACE=true`):
-- InsightFace + ONNXRuntime (CPU) — модель buffalo_l (SCRFD + ArcFace, ~280 МБ)
-- OpenCV (cv2) — предобработка фото, оценка резкости
-- NumPy — работа с массивами и эмбеддингами
-
----
-
-## 7. Установка и запуск
-
-### 7.1 Базовая установка (без распознавания лиц)
 ```bash
 # Создать виртуальное окружение
 python -m venv venv
@@ -160,179 +235,113 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Создать файл `.env` по образцу `.env.example`:
+Создайте `.env` файл (см. раздел 3.1) с минимальным набором:
 ```
 TG_TOKEN=ваш_токен_телеграм_бота
 VK_API_VERSION=5.131
 USE_INSIGHTFACE=false
 ```
 
+Если используете PostgreSQL — добавьте `DATABASE_URL` и примените миграции:
+```bash
+alembic upgrade head
+```
+
 Запуск:
 ```bash
 python -m src.main
 ```
 
-### 7.2 Установка с распознаванием лиц (InsightFace)
+### 4.2 Установка с распознаванием лиц (InsightFace)
 
-Установить дополнительные пакеты:
+#### Шаг 1. Установить зависимости
+
 ```bash
-pip install numpy opencv-python onnxruntime insightface
+pip install numpy opencv-python onnxruntime
 ```
 
-**Windows без Visual Studio Build Tools:**
-InsightFace требует компиляции C-расширений (mesh_core_cython).
-Если Visual Studio Build Tools не установлены, можно установить InsightFace без Cython-расширений:
-1) Скачать tarball: `pip download insightface --no-binary insightface --no-deps -d ./tmp_pkg`
-2) Распаковать архив
-3) В `setup.py` удалить или закомментировать секцию `ext_modules` (Cython расширения)
-4) Установить из изменённого каталога: `pip install ./tmp_pkg/insightface-X.X.X/ --no-deps --no-build-isolation`
-5) Пропатчить `venv/.../insightface/thirdparty/face3d/mesh/__init__.py` — обернуть import mesh_core_cython в try/except
-6) Пропатчить `venv/.../insightface/app/__init__.py` — обернуть `from .mask_renderer import *` в try/except
+#### Шаг 2. Установить InsightFace
 
-В `.env` установить:
+**Linux / macOS (или Windows с Visual Studio Build Tools):**
+```bash
+pip install insightface
+```
+
+**Windows без Visual Studio Build Tools** (обходной путь):
+
+InsightFace 0.7.3 требует компиляции C-расширения `mesh_core_cython`. Без компилятора выполните:
+
+```bash
+# 1) Установить wheel (нужен для сборки)
+pip install wheel
+
+# 2) Скачать исходники
+mkdir tmp_pkg
+pip download insightface==0.7.3 --no-binary insightface --no-deps -d ./tmp_pkg
+
+# 3) Распаковать архив
+cd tmp_pkg
+tar xzf insightface-0.7.3.tar.gz
+
+# 4) В файле tmp_pkg/insightface-0.7.3/setup.py:
+#    - Удалить строки с import Cython (from Cython.Distutils, from Cython.Build)
+#    - Удалить строки с import Extension (from distutils.core import Extension)
+#    - Заменить extensions = [...] на extensions = []
+#    - Заменить ext_modules=cythonize(extensions) на ext_modules=[]
+#    - Удалить строки headers=[...], ext_modules=ext_modules, include_dirs=numpy.get_include()
+
+# 5) Установить из изменённого каталога
+cd ..
+pip install ./tmp_pkg/insightface-0.7.3/ --no-deps --no-build-isolation
+
+# 6) Пропатчить файл venv/.../insightface/thirdparty/face3d/mesh/__init__.py:
+#    Заменить:
+#      from .cython import mesh_core_cython
+#    На:
+#      try:
+#          from .cython import mesh_core_cython
+#      except ImportError:
+#          mesh_core_cython = None
+
+# 7) Пропатчить файл venv/.../insightface/app/__init__.py:
+#    Заменить:
+#      from .mask_renderer import *
+#    На:
+#      try:
+#          from .mask_renderer import *
+#      except ImportError:
+#          pass
+
+# 8) Установить runtime-зависимости insightface
+pip install onnx tqdm requests matplotlib Pillow scipy scikit-learn scikit-image easydict albumentations prettytable
+```
+
+Модуль `mesh_core_cython` используется только для 3D-рендеринга масок — он не нужен для основной задачи (детекция + эмбеддинги).
+
+#### Шаг 3. Настроить .env
+
 ```
 USE_INSIGHTFACE=true
 INSIGHTFACE_MODEL=buffalo_l
 ```
 
-При первом запуске модель buffalo_l (~280 МБ) будет скачана автоматически.
+#### Шаг 4. Запуск
 
-Запуск:
 ```bash
 python -m src.main
 ```
 
+При первом запуске модель `buffalo_l` (~280 МБ) скачивается автоматически в `data/models/`.
+В логах появится: `FaceDetector инициализирован (buffalo_l, CPU)` и `FaceDetector прогрет и готов к работе`.
+
 ---
 
-## 8. Задание для SQL-специалиста (реализация PostgreSQL)
+## 5. Требования
 
-### Описание задачи
-Текущая реализация хранения данных — `InMemoryUserRepo` (заглушка в памяти).
-Для production необходимо создать реализацию интерфейса `UserRepo` (Protocol) с использованием PostgreSQL.
+- Python 3.11+
+- Telegram Bot Token (от @BotFather)
+- VK user token + VK ID (пользователь вводит в чат бота)
 
-Интерфейс определён в `src/infrastructure/db/repositories.py` и содержит все необходимые методы.
-Новая реализация должна быть **drop-in заменой** `InMemoryUserRepo` — реализовать все те же методы с теми же сигнатурами.
-
-### DTO (Data Transfer Objects)
-Определены в `src/infrastructure/db/repositories.py`:
-
-| DTO | Поля | Описание |
-|-----|------|----------|
-| `UserDTO` | `tg_user_id`, `vk_access_token`, `vk_user_id`, `filter_city_name`, `filter_city_id`, `filter_gender`, `filter_age_from`, `filter_age_to`, `history_cursor` | Пользователь Telegram |
-| `ProfileDTO` | `vk_user_id`, `first_name`, `last_name`, `domain` | Профиль кандидата VK |
-| `PhotoDTO` | `photo_id`, `owner_id`, `url`, `likes_count`, `local_path`, `status` | Фото кандидата VK |
-
-### Методы UserRepo Protocol (для реализации SQL-запросов)
-
-#### Пользователи (tg_users)
-
-| Метод | Сигнатура | SQL-логика |
-|-------|-----------|------------|
-| `get_or_create_user` | `(tg_user_id: int) → UserDTO` | `SELECT ... WHERE tg_user_id = ?`, если нет — `INSERT` и вернуть |
-| `upsert_user_token_and_vk_id` | `(tg_user_id, vk_access_token, vk_user_id) → None` | `INSERT ... ON CONFLICT UPDATE SET vk_access_token=?, vk_user_id=?` |
-| `update_filters` | `(tg_user_id, city, gender, age_from, age_to, city_id=None) → None` | `UPDATE tg_users SET filter_city_name=?, filter_city_id=?, filter_gender=?, filter_age_from=?, filter_age_to=?, history_cursor=0 WHERE tg_user_id=?`. Также удалить очередь кандидатов при смене фильтров |
-
-#### Курсор навигации
-
-| Метод | Сигнатура | SQL-логика |
-|-------|-----------|------------|
-| `get_cursor` | `(tg_user_id) → int` | `SELECT history_cursor FROM tg_users WHERE tg_user_id=?`, дефолт 0 |
-| `set_cursor` | `(tg_user_id, cursor) → None` | `UPDATE tg_users SET history_cursor=? WHERE tg_user_id=?` |
-
-#### Избранное и чёрный список
-
-| Метод | Сигнатура | SQL-логика |
-|-------|-----------|------------|
-| `add_favorite` | `(tg_user_id, vk_profile_id) → None` | `INSERT INTO favorites (tg_user_id, vk_profile_id) ON CONFLICT DO NOTHING` |
-| `remove_favorite` | `(tg_user_id, vk_profile_id) → None` | `DELETE FROM favorites WHERE tg_user_id=? AND vk_profile_id=?` |
-| `list_favorites` | `(tg_user_id) → list[int]` | `SELECT vk_profile_id FROM favorites WHERE tg_user_id=? ORDER BY vk_profile_id` |
-| `add_blacklist` | `(tg_user_id, vk_profile_id) → None` | `INSERT INTO blacklist (tg_user_id, vk_profile_id) ON CONFLICT DO NOTHING`. Также удалить из очереди и скорректировать курсор |
-
-#### Очередь кандидатов (search_queue)
-
-| Метод | Сигнатура | SQL-логика |
-|-------|-----------|------------|
-| `set_queue` | `(tg_user_id, vk_ids: list[int]) → None` | `DELETE FROM search_queue WHERE tg_user_id=?` + `INSERT` всех vk_ids с позициями + сбросить cursor=0 |
-| `get_queue` | `(tg_user_id) → list[int]` | `SELECT vk_id FROM search_queue WHERE tg_user_id=? ORDER BY position` |
-| `get_current_vk_id` | `(tg_user_id) → int｜None` | Получить `history_cursor`, затем `SELECT vk_id FROM search_queue WHERE tg_user_id=? AND position=?` |
-| `move_next` | `(tg_user_id) → int｜None` | Инкремент cursor (если не конец очереди), вернуть vk_id на новой позиции |
-| `move_prev` | `(tg_user_id) → int｜None` | Декремент cursor (если не начало), вернуть vk_id. None если cursor=0 |
-
-#### Профили кандидатов VK
-
-| Метод | Сигнатура | SQL-логика |
-|-------|-----------|------------|
-| `upsert_profile` | `(profile: ProfileDTO) → None` | `INSERT INTO vk_profiles (...) ON CONFLICT (vk_user_id) DO UPDATE SET ...` |
-| `get_profile` | `(vk_user_id) → ProfileDTO｜None` | `SELECT ... FROM vk_profiles WHERE vk_user_id=?` |
-
-#### Фото кандидатов VK
-
-| Метод | Сигнатура | SQL-логика |
-|-------|-----------|------------|
-| `set_photos` | `(vk_user_id, photos: list[PhotoDTO]) → None` | `DELETE FROM vk_photos WHERE owner_id=?` + `INSERT` всех фото |
-| `get_photos` | `(vk_user_id) → list[PhotoDTO]` | `SELECT ... FROM vk_photos WHERE owner_id=?` |
-
-### Рекомендуемая схема таблиц PostgreSQL
-
-```sql
-CREATE TABLE tg_users (
-    tg_user_id       BIGINT PRIMARY KEY,
-    vk_access_token  TEXT,
-    vk_user_id       BIGINT,
-    filter_city_name TEXT,
-    filter_city_id   INTEGER,
-    filter_gender    INTEGER,
-    filter_age_from  INTEGER,
-    filter_age_to    INTEGER,
-    history_cursor   INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE vk_profiles (
-    vk_user_id  BIGINT PRIMARY KEY,
-    first_name  TEXT NOT NULL DEFAULT '',
-    last_name   TEXT NOT NULL DEFAULT '',
-    domain      TEXT NOT NULL DEFAULT ''
-);
-
-CREATE TABLE vk_photos (
-    photo_id    BIGINT,
-    owner_id    BIGINT NOT NULL,
-    url         TEXT NOT NULL,
-    likes_count INTEGER NOT NULL DEFAULT 0,
-    local_path  TEXT,
-    status      TEXT NOT NULL DEFAULT 'raw',
-    PRIMARY KEY (photo_id, owner_id)
-);
-
-CREATE TABLE search_queue (
-    tg_user_id BIGINT NOT NULL,
-    position   INTEGER NOT NULL,
-    vk_id      BIGINT NOT NULL,
-    PRIMARY KEY (tg_user_id, position)
-);
-
-CREATE TABLE favorites (
-    tg_user_id    BIGINT NOT NULL,
-    vk_profile_id BIGINT NOT NULL,
-    PRIMARY KEY (tg_user_id, vk_profile_id)
-);
-
-CREATE TABLE blacklist (
-    tg_user_id    BIGINT NOT NULL,
-    vk_profile_id BIGINT NOT NULL,
-    PRIMARY KEY (tg_user_id, vk_profile_id)
-);
-```
-
-### Как подключить новую реализацию
-1) Создать класс `PostgresUserRepo` в `src/infrastructure/db/` (реализует все методы `UserRepo` Protocol).
-2) В `src/presentation/tg/bot.py` заменить `InMemoryUserRepo()` на `PostgresUserRepo(session)`.
-3) Добавить `DATABASE_URL` в `.env`.
-
-Пример подключения (в `bot.py`):
-```python
-# было:
-user_repo = InMemoryUserRepo()
-# стало:
-user_repo = PostgresUserRepo(session=async_session)
-```
+Опционально:
+- PostgreSQL (для постоянного хранения данных)
+- InsightFace + ONNXRuntime + OpenCV + NumPy (для распознавания лиц)
