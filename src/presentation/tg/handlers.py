@@ -12,7 +12,7 @@ from src.presentation.tg.keyboards import (
     kb_favorite_item, kb_main, kb_more, kb_start, kb_after_auth,
     kb_favorites_inline, kb_favorites_delete_inline, kb_favorite_back
 )
-from src.infrastructure.db.repositories import InMemoryUserRepo
+from src.infrastructure.db.repositories import UserRepo
 
 from aiogram import Router, F
 from aiogram.filters import CommandStart
@@ -21,7 +21,7 @@ from aiogram.fsm.context import FSMContext
 
 
 def setup_handlers(
-        user_repo: InMemoryUserRepo,
+        user_repo: UserRepo,
         auth_service: AuthService,
         dating_service: DatingService,
         photo_service: PhotoProcessingService
@@ -258,7 +258,10 @@ def setup_handlers(
                     except Exception:
                         pass
 
-        local_photos = [p for p in photos if p.local_path and Path(p.local_path).exists()]
+        local_photos = [
+            p for p in photos
+            if p.status == 'selected' and p.local_path and Path(p.local_path).exists()
+        ]
 
         # если фото нет — пропускаем кандидата автоматически
         if not local_photos:
@@ -447,8 +450,11 @@ def setup_handlers(
         else:
             text = f"vk.com/id{vk_profile_id}"
 
-        # отправляем фото
-        local_photos = [p for p in photos if p.local_path and Path(p.local_path).exists()]
+        # отправляем фото (только selected)
+        local_photos = [
+            p for p in photos
+            if p.status == 'selected' and p.local_path and Path(p.local_path).exists()
+        ]
         if local_photos:
             if len(local_photos) >= 2:
                 media = []

@@ -3,17 +3,18 @@
 import logging
 from dataclasses import dataclass, field
 from src.infrastructure.vk.methods import VkMethods
-from src.infrastructure.db.repositories import InMemoryUserRepo, ProfileDTO
+from src.infrastructure.db.repositories import UserRepo, ProfileDTO
+from src.core.config import PHOTO_BUFFER_AHEAD
 
 logger = logging.getLogger(__name__)
 
-PRELOAD_BUFFER = 5  # количество анкет, подготовленных впереди курсора
+PRELOAD_BUFFER = PHOTO_BUFFER_AHEAD  # количество анкет, подготовленных впереди курсора
 
 
 @dataclass
 class DatingService:
     vk: VkMethods
-    user_repo: InMemoryUserRepo
+    user_repo: UserRepo
     _photo_service: object | None = field(default=None, repr=False)
 
     async def resolve_city_id(self, access_token: str, city_name: str) -> int | None:

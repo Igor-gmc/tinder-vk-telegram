@@ -13,10 +13,10 @@ from dotenv import load_dotenv
 # --------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # корень проекта
-SRC_PATH = BASE_DIR / "src"
 
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
+# Добавляем корень проекта в sys.path, чтобы работали импорты from src.*
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 
 
 # --------------------------------------------------
@@ -30,8 +30,10 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set")
 
-# Alembic работает только с sync драйвером
-SYNC_DATABASE_URL = DATABASE_URL.replace("+asyncpg", "")
+# Alembic работает с sync драйвером.
+# +asyncpg — async-only, заменяем на +psycopg (sync-совместимый).
+# +psycopg — уже sync-совместимый, оставляем как есть.
+SYNC_DATABASE_URL = DATABASE_URL.replace("+asyncpg", "+psycopg")
 
 
 # --------------------------------------------------
@@ -49,7 +51,7 @@ if config.config_file_name is not None:
 # ИМПОРТ МОДЕЛЕЙ
 # --------------------------------------------------
 
-from infrastructure.db.models import Base
+from src.infrastructure.db.models import Base
 
 target_metadata = Base.metadata
 

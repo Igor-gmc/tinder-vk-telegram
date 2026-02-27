@@ -1,7 +1,6 @@
 ﻿# ==============================
 #   ClaudeCode (Anthropic)
 # ==============================
-
 .claude/
 claude/
 claude_cache/
@@ -36,8 +35,8 @@ __pycache__/
 # ==============================
 #   Environments
 # ==============================
-
 venv/
+.venv/
 .env
 .env.local
 .env.*.local
@@ -65,9 +64,6 @@ venv/
 *.tmp
 *.swp
 *.lock
-
-intests
-.intests/*
 
 # ============================================================================
 # ВАЖНО: Этот файл НЕ игнорируется
@@ -340,8 +336,7 @@ site/
 *.db
 *.sqlite
 *.sqlite3
-.env
-/.venv
+
 # Hugging Face cache
 .cache/
 huggingface/

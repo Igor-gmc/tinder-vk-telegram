@@ -17,7 +17,8 @@ class PhotoDTO: # метаданные фото кандидата
     url: str
     likes_count: int = 0
     local_path: Optional[str] = None
-    status: str = 'raw'  # raw/selected/rejected (для InsightFace потом)
+    status: str = 'raw'  # raw/accepted/rejected/selected
+    reject_reason: Optional[str] = None  # no_face/multi_face/blurry/small_face/low_score/error
 
 @dataclass
 class UserDTO: #dataclass с полями пользователя

@@ -1,4 +1,4 @@
-# SCRFD: detect_faces(image) → list[Face]
+# SCRFD: detect(image_path) → list[DetectedFace]
 
 import logging
 import cv2
@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from insightface.app import FaceAnalysis
 
-from src.core.config import DATA_PATH
+from src.core.config import DATA_PATH, INSIGHTFACE_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +42,14 @@ class FaceDetector:
     def __init__(self, models_dir: Path | None = None, det_size: tuple[int, int] = (640, 640)):
         root = str(models_dir or DATA_PATH / 'models')
         self._app = FaceAnalysis(
-            name='buffalo_l',
+            name=INSIGHTFACE_MODEL,
             root=root,
             providers=['CPUExecutionProvider'],
         )
         self._app.prepare(ctx_id=0, det_size=det_size)
-        logger.info('FaceDetector инициализирован (buffalo_l, CPU)')
+        logger.info('FaceDetector инициализирован (%s, CPU)', INSIGHTFACE_MODEL)
 
-    def detect_faces(self, image_path: str) -> list[DetectedFace]:
+    def detect(self, image_path: str) -> list[DetectedFace]:
         """
         Детектирует лица на изображении.
         Возвращает список DetectedFace с bbox, score, landmark, embedding.

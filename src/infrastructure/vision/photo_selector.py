@@ -61,16 +61,18 @@ def select_top_photos(
     for photo in photos:
         if not photo.local_path or not Path(photo.local_path).exists():
             photo.status = 'rejected'
+            photo.reject_reason = 'error'
             continue
 
         # детекция лиц
-        faces = detector.detect_faces(photo.local_path)
+        faces = detector.detect(photo.local_path)
 
         # фильтр: ровно 1 лицо, det_score, размер
         face = detector.filter_single_face(faces)
         if face is None:
-            photo.status = 'rejected'
             reason = _get_reject_reason(faces)
+            photo.status = 'rejected'
+            photo.reject_reason = reason
             logger.debug('Фото %s отклонено: %s', photo.photo_id, reason)
             continue
 
@@ -78,9 +80,12 @@ def select_top_photos(
         blur_score = calc_blur_score(photo.local_path, face.bbox)
         if blur_score < MIN_BLUR_SCORE:
             photo.status = 'rejected'
-            logger.debug('Фото %s отклонено: размытое (blur=%.1f)', photo.photo_id, blur_score)
+            photo.reject_reason = 'blurry'
+            logger.debug('Фото %s отклонено: blurry (blur=%.1f)', photo.photo_id, blur_score)
             continue
 
+        # фото прошло все фильтры — промежуточный статус accepted
+        photo.status = 'accepted'
         analyzed = AnalyzedPhoto(photo_dto=photo, face=face, blur_score=blur_score)
 
         # ищем подходящую группу
@@ -110,13 +115,6 @@ def select_top_photos(
     # берём самую большую группу
     best_group = max(groups, key=lambda g: len(g.photos))
 
-    # помечаем фото из других групп как rejected
-    best_ids = {a.photo_dto.photo_id for a in best_group.photos}
-    for group in groups:
-        for a in group.photos:
-            if a.photo_dto.photo_id not in best_ids:
-                a.photo_dto.status = 'rejected'
-
     # ранжируем лучшую группу по лайкам, берём top_n
     best_group.photos.sort(key=lambda a: a.photo_dto.likes_count, reverse=True)
     selected = best_group.photos[:top_n]
@@ -124,9 +122,8 @@ def select_top_photos(
     for a in selected:
         a.photo_dto.status = 'selected'
 
-    # остальные в лучшей группе — rejected
-    for a in best_group.photos[top_n:]:
-        a.photo_dto.status = 'rejected'
+    # остальные в лучшей группе остаются accepted (прошли фильтры, но не в top-N)
+    # фото из других групп тоже остаются accepted
 
     result = [a.photo_dto for a in selected]
     logger.info(

@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, String, ForeignKey, UniqueConstraint
+from sqlalchemy import BigInteger, Integer, String, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -11,10 +11,10 @@ class Base(DeclarativeBase):
 class User(Base):
     __tablename__ = "users"
 
-    tg_user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tg_user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
 
     vk_access_token: Mapped[str | None] = mapped_column(String, nullable=True)
-    vk_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    vk_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     filter_city_name: Mapped[str | None] = mapped_column(String, nullable=True)
     filter_city_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -32,10 +32,10 @@ class QueueItem(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tg_user_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("users.tg_user_id")
+        BigInteger,
+        ForeignKey("users.tg_user_id"),
     )
-    vk_profile_id: Mapped[int] = mapped_column(Integer)
+    vk_profile_id: Mapped[int] = mapped_column(BigInteger)
     position: Mapped[int] = mapped_column(Integer)
 
 
@@ -45,8 +45,8 @@ class FavoriteProfile(Base):
     __tablename__ = "favorites"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    tg_user_id: Mapped[int] = mapped_column(Integer)
-    vk_profile_id: Mapped[int] = mapped_column(Integer)
+    tg_user_id: Mapped[int] = mapped_column(BigInteger)
+    vk_profile_id: Mapped[int] = mapped_column(BigInteger)
 
     __table_args__ = (
         UniqueConstraint("tg_user_id", "vk_profile_id"),
@@ -59,8 +59,12 @@ class Blacklist(Base):
     __tablename__ = "blacklist"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    tg_user_id: Mapped[int] = mapped_column(Integer)
-    vk_profile_id: Mapped[int] = mapped_column(Integer)
+    tg_user_id: Mapped[int] = mapped_column(BigInteger)
+    vk_profile_id: Mapped[int] = mapped_column(BigInteger)
+
+    __table_args__ = (
+        UniqueConstraint("tg_user_id", "vk_profile_id"),
+    )
 
 
 # ================= PROFILES =================
@@ -68,25 +72,28 @@ class Blacklist(Base):
 class Profile(Base):
     __tablename__ = "profiles"
 
-    vk_user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    first_name: Mapped[str] = mapped_column(String)
-    last_name: Mapped[str] = mapped_column(String)
-    domain: Mapped[str] = mapped_column(String)
+    vk_user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    first_name: Mapped[str] = mapped_column(String, default='')
+    last_name: Mapped[str] = mapped_column(String, default='')
+    domain: Mapped[str] = mapped_column(String, default='')
 
+
+# ================= PHOTOS =================
 
 class Photo(Base):
     __tablename__ = "photos"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     vk_user_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("profiles.vk_user_id")
+        BigInteger,
+        ForeignKey("profiles.vk_user_id"),
     )
 
-    photo_id: Mapped[int] = mapped_column(Integer)
-    owner_id: Mapped[int] = mapped_column(Integer)
+    photo_id: Mapped[int] = mapped_column(BigInteger)
+    owner_id: Mapped[int] = mapped_column(BigInteger)
     url: Mapped[str] = mapped_column(String)
-    likes_count: Mapped[int] = mapped_column(Integer)
+    likes_count: Mapped[int] = mapped_column(Integer, default=0)
 
     local_path: Mapped[str | None] = mapped_column(String, nullable=True)
-    status: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default='raw')
+    reject_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)

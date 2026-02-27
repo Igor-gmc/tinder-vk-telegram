@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncEngine
-from infrastructure.db.models import Base
+from src.infrastructure.db.models import Base
 
 
 async def init_db(engine: AsyncEngine) -> None:

@@ -8,8 +8,8 @@ from pathlib import Path
 from dataclasses import dataclass, field
 
 from src.infrastructure.vk.methods import VkMethods
-from src.infrastructure.db.repositories import InMemoryUserRepo, PhotoDTO
-from src.core.config import DATA_PATH, USE_INSIGHTFACE
+from src.infrastructure.db.repositories import UserRepo, PhotoDTO
+from src.core.config import PHOTO_DIR, PHOTO_BATCH_SIZE, USE_INSIGHTFACE
 
 _HAS_INSIGHTFACE = False
 if USE_INSIGHTFACE:
@@ -26,10 +26,10 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PhotoProcessingService:
     vk: VkMethods
-    user_repo: InMemoryUserRepo
-    photos_dir: Path = DATA_PATH / 'photos'
-    top_n: int = 3           # сколько лучших фото отбирать
-    download_n: int = 10     # сколько фото скачивать для анализа InsightFace
+    user_repo: UserRepo
+    photos_dir: Path = PHOTO_DIR
+    top_n: int = 3                       # сколько лучших фото отбирать
+    download_n: int = PHOTO_BATCH_SIZE   # сколько фото скачивать для анализа InsightFace
     _detector: object | None = field(default=None, repr=False)
 
     async def _get_detector_async(self):
@@ -153,8 +153,8 @@ class PhotoProcessingService:
             await self.user_repo.set_photos(vk_user_id, fallback)
             return fallback
 
-        # 6) сохраняем в repo
-        await self.user_repo.set_photos(vk_user_id, selected)
+        # 6) сохраняем ВСЕ фото (rejected/accepted/selected) — для аналитики
+        await self.user_repo.set_photos(vk_user_id, downloaded)
         return selected
 
     def _get_best_url(self, item: dict) -> str | None:

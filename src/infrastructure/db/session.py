@@ -1,19 +1,7 @@
-import os
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
-DATABASE_URL = os.getenv("DATABASE_URL")
 
-if not DATABASE_URL:
-    raise RuntimeError(
-        "DATABASE_URL is not set. Please set environment variable."
-    )
-
-engine = create_async_engine(
-    DATABASE_URL,
-    echo=False,
-)
-
-SessionLocal = async_sessionmaker(
-    engine,
-    expire_on_commit=False,
-)
+def create_session_factory(database_url: str) -> async_sessionmaker[AsyncSession]:
+    """Создаёт фабрику асинхронных сессий SQLAlchemy."""
+    engine = create_async_engine(database_url, echo=False)
+    return async_sessionmaker(engine, expire_on_commit=False)
